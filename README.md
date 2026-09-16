@@ -2,8 +2,8 @@ https://github.com/user-attachments/assets/2f902600-9682-4e67-a75c-fc8fa358cb92
 
 # PolyUMI: Visual + Auditory + Tactile Manipulation Platform for Imitation Learning
 
-**Project website:** https://cwoodhayes.github.io/projects/polyumi<br>
-**Hardware build guide:** [Google Doc](https://docs.google.com/document/d/1T0v_7H8YAJjOud9QWYlQct29a78YKvELPIpKTzajFs0/edit?usp=sharing)
+**Project website:** withheld for double-blind review<br>
+**Hardware build guide:** withheld for double-blind review
 
 PolyUMI is an imitation learning platform supporting UMI-style data collection via a handheld gripper, which unifies the following sensor modalities in a single end-effector:
 - **touch** (via a custom optical tactile-sensing finger, based on [PolyTouch](https://polytouch.alanz.info/)) - *10fps 540x480 MJPEG video (MP4)*
@@ -36,11 +36,11 @@ external/         # Git submodules
   ORB_SLAM3_PolyUMI/        # PolyUMI's ORB_SLAM3 fork (monocular visual-inertial SLAM for the GoPro Hero 12)
   polyumi_diffusion_policy  # control policy implementations, dockerized & wrapped in an API server
 inference_server/ # polyumi_inference: the inference wire protocol and both ends of it
-                  #   (the ROS client imports it; so does the policy server. See docs/crb-fr3-inference.md)
+                  #   (the ROS client imports it; so does the policy server. See docs/lab-fr3-inference.md)
 infra/            # RPi provisioning infrastructure (see docs/pi-provisioning.md)
 ingest/           # PC-side CLI: fetch sessions from Pi, run preprocessing pipeline, and export training datasets
 notebooks/        # jupyter notebooks for bringup/debugging
-nuc/              # inference pipeline code specific to Northwestern CRB's Franka FR3 arm setup
+nuc/              # inference pipeline code specific to our lab's Franka FR3 arm setup
 pi/               # RPi app: streaming server for video + audio on the EE, gripper episode recording, etc
 ros2_ws/
   src/
@@ -51,9 +51,9 @@ ros2_ws/
 **Additional scripts:**
 ```
 deploy.sh           # deploys code updates to the pi
-fr3_session.sh      # brings up tmux sessions for inference on the CRB's arm
+fr3_session.sh      # brings up tmux sessions for inference on our lab's arm
 serve_policy.sh     # brings up inference server for a trained model
-setup_franka_env.sh # sets up PC-side environment for interacting with the CRB's arm
+setup_franka_env.sh # sets up PC-side environment for interacting with our lab's arm
 train_policy.sh     # starts model training
 ```
 
@@ -66,7 +66,7 @@ train_policy.sh     # starts model training
 **GPU workstation** (training + policy serving via [`train_policy.sh`](train_policy.sh) / [`serve_policy.sh`](serve_policy.sh)): our code has only been tested to run on
 an NVIDIA RTX 6000 Ada GPU (48GB VRAM), but should run with at least 32GB. You need Docker with the NVIDIA container toolkit (ours runs rootless). Everything else lives in the image, so no host conda or CUDA toolkit is needed, nor is ROS. Optionally a [Weights & Biases](https://wandb.ai) API key for logging. See [docs/training-instructions.md](docs/training-instructions.md).
 
-**Robot arm** (inference, optional): any arm you can drive from ROS 2. Ours is a Franka FR3 driven from a NUC running Ubuntu 22.04 / ROS 2 Humble and the Franka stack, talking to the PC over CycloneDDS; the arm-side code is in [nuc/](nuc/). See [docs/crb-fr3-inference.md](docs/crb-fr3-inference.md).
+**Robot arm** (inference, optional): any arm you can drive from ROS 2. Ours is a Franka FR3 driven from a NUC running Ubuntu 22.04 / ROS 2 Humble and the Franka stack, talking to the PC over CycloneDDS; the arm-side code is in [nuc/](nuc/). See [docs/lab-fr3-inference.md](docs/lab-fr3-inference.md).
 
 ## Installation
 
@@ -76,10 +76,17 @@ Clone the repo and initialize the ORB-SLAM3 submodule (used by the SLAM
 preprocessing step):
 
 ```bash
-git clone git@github.com:cwoodhayes/PolyUMI.git
+git clone git@github.com:anon-authors/PolyUMI.git
 cd PolyUMI
 git submodule update --init --recursive
 ```
+
+> **Note for reviewers:** this repository has been anonymized for double-blind review. Our own
+> forks — the ORB-SLAM3 fork, the policy forks, the OpenGoPro fork, and the impedance controller —
+> are hosted under accounts that would identify the authors, so their URLs here are placeholders
+> and will not resolve. `git submodule update` and `uv sync` will therefore fail until the
+> camera-ready version restores them. Third-party upstreams (e.g. `frankarobotics/franka_ros2`)
+> are unchanged and resolve normally.
 
 Install ingest dependencies (includes the `polyumi_pi` package for shared data types):
 
@@ -108,7 +115,7 @@ source install/setup.bash
 cd ..
 ```
 
-Build the [ORB-SLAM3 fork](https://github.com/cwoodhayes/ORB_SLAM3_PolyUMI). First, install the system dependencies (Ubuntu;
+Build the [ORB-SLAM3 fork](https://github.com/anon-authors/ORB_SLAM3_PolyUMI). First, install the system dependencies (Ubuntu;
 the fork's [README.md](external/ORB_SLAM3_PolyUMI/README.md) has more detail):
 
 ```bash
@@ -230,12 +237,12 @@ how you bring that up, network the two machines, and configure DDS depends on yo
 robot and lab. The protocol — the wire format, the client, and the server app — is the `polyumi_inference` library in
 [inference_server/](inference_server/).
 
-[docs/crb-fr3-inference.md](docs/crb-fr3-inference.md) is a worked example for one
+[docs/lab-fr3-inference.md](docs/lab-fr3-inference.md) is a worked example for one
 specific Franka FR3 setup that you can adapt.
 
 ## Hardware Notes
 
-The Raspberry Pi app in `pi/` also depends upon a custom fork of [OpenGoPro](https://github.com/cwoodhayes/OpenGoPro) with some specific extra capabilities & one bugfix; without these the library cannot connect over BLE on Debian Trixie (and its downsteam RPi fork which we are using.)
+The Raspberry Pi app in `pi/` also depends upon a custom fork of [OpenGoPro](https://github.com/anon-authors/OpenGoPro) with some specific extra capabilities & one bugfix; without these the library cannot connect over BLE on Debian Trixie (and its downsteam RPi fork which we are using.)
 
 ### PiSugar Battery
 
@@ -303,23 +310,12 @@ Run `polyumi-pi --help` for a full list of commands.
 
 ## Citation
 
-If you just want to use PolyUMI's hardware designs + associated system software (i.e. the pi application), please cite the original workshop paper:
+This system was previously described in a workshop paper. The citation is **withheld for
+double-blind review** and will be restored in the camera-ready version.
 
-```bibtex
-@inproceedings{hayes2026polyumi,
-  title     = {PolyUMI: Visual + Auditory + Tactile Manipulation Platform for Imitation Learning},
-  author    = {Hayes, Conor Wood},
-  booktitle = {IEEE ICRA 2026 Workshop on Contact-Rich Robotic Manipulation (CR2)},
-  year      = {2026},
-  url       = {https://openreview.net/forum?id=Ou39QMiCMP}
-}
-```
-
-If you wish to cite the full tactile learning system (including models, datasets, inference pipeline, etc),
-please let us know, as this will be released in an upcoming work.
+If you wish to cite the full tactile learning system (including models, datasets, inference
+pipeline, etc), please note that this will be released in an upcoming work.
 
 ## Acknowledgments & Maintenance
 
-This project was originally developed by Conor Wood Hayes as part of the Master of Science in Robotics (MSR) program at Northwestern University.
-
-It is currently maintained by the **[Center for Robotics and Biosystems](https://robotics.northwestern.edu/)** at Northwestern University.
+Author and institutional affiliation details are **withheld for double-blind review**.

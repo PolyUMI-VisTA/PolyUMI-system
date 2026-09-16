@@ -147,40 +147,40 @@ spawner immediately makes it unretryable and a wrong gravity model is easy to mi
 message is only in the `/service_server` log. Full procedure in
 [docs/calibration-instructions.md](docs/calibration-instructions.md).
 
-**`./fr3_session.sh`** (repo root) builds the whole wall — NUC, Pi, lamb — as one
+**`./fr3_session.sh`** (repo root) builds the whole wall — NUC, Pi, polyumi-server — as one
 tmux session, running the safe commands and pre-typing the robot-moving ones for you to
-confirm. **lamb runs both halves** — the ROS client and the policy server — so the laptop is
+confirm. **polyumi-server runs both halves** — the ROS client and the policy server — so the laptop is
 only a terminal and the inference request stays on loopback. Every fresh start (not a re-attach)
-rsyncs `nuc/` to the NUC, runs `./deploy.sh` for the Pi and `./deploy_lamb.sh` for lamb, so all
+rsyncs `nuc/` to the NUC, runs `./deploy.sh` for the Pi and `./deploy_server.sh` for polyumi-server, so all
 three run this working copy rather than whatever they last had — `SKIP_DEPLOY=1` skips that for a
-faster re-launch. Re-run to re-attach after a disconnect; the NUC/lamb panes are remote tmux, so
+faster re-launch. Re-run to re-attach after a disconnect; the NUC/polyumi-server panes are remote tmux, so
 they survive. Per-host link settings (NIC, static IP, CycloneDDS config) live in
 `config/env.<hostname>.sh`, sourced by `setup_franka_env.sh`. Full reference and the exact
-environment assumptions live in [docs/crb-fr3-inference.md](docs/crb-fr3-inference.md).
+environment assumptions live in [docs/lab-fr3-inference.md](docs/lab-fr3-inference.md).
 
 **Clock sync (this setup):** the NUC and laptop must agree on wall time or TF lookups fail
-with "extrapolation into the past". The NUC (`jailfranka`) is on a jailed VLAN that blocks
+with "extrapolation into the past". The NUC (`polyumi-nuc`) is on a jailed VLAN that blocks
 outbound **UDP 123**, so it cannot reach public NTP — it syncs to the **laptop over the
 `10.0.0.x` arm link** instead. This is wired durably via chrony drop-ins (persist across
 reboots): the NUC has `/etc/chrony/conf.d/laptop-time.conf` = `server 10.0.0.1 iburst prefer`,
 and the laptop has `/etc/chrony/conf.d/allow-fr3-link.conf` = `allow 10.0.0.0/24` (plus its
-existing internet pools + `local stratum 5`). Verify with `ssh jailfranka chronyc sources` →
+existing internet pools + `local stratum 5`). Verify with `ssh polyumi-nuc chronyc sources` →
 expect `^* 10.0.0.1` (sub-ms offset). If it ever drifts again, the laptop was probably down /
 off `10.0.0.1` when the NUC booted (the NUC then falls back to its own `local stratum 10`
-clock); `ssh jailfranka 'sudo chronyc makestep'` once the link is up re-steps it. With this in
+clock); `ssh polyumi-nuc 'sudo chronyc makestep'` once the link is up re-steps it. With this in
 place, `tf_use_latest` is no longer needed for real runs — it was only a stationary-dry-run
 crutch for the old skew.
 
 **The Pi needs the same treatment, against a different host.** Its camera and audio streams are
 stamped in epoch nanoseconds at the capture instant and `pi_receiver_node` republishes those
 verbatim as ROS headers, so the Pi has to agree with whichever machine runs the ROS nodes
-(`lamb`, not the laptop). This is lab-specific and not provisioned by cloud-init — the drop-ins
+(`polyumi-server`, not the laptop). This is lab-specific and not provisioned by cloud-init — the drop-ins
 and the verification are step 6 of [docs/pi-provisioning.md](docs/pi-provisioning.md), and
 `./deploy.sh` warns on every deploy when the Pi has no synchronised source.
 
 **The impedance controller is its own open-source repo now**, consumed as the submodule
 `external/franka_streaming_impedance_controller`
-([github](https://github.com/cwoodhayes/franka_streaming_impedance_controller), MIT). It holds
+([github](https://github.com/anon-authors/franka_streaming_impedance_controller), MIT). It holds
 two packages:
 
 - `franka_streaming_impedance_controller` (ament_cmake) — the core math library, the
@@ -188,7 +188,7 @@ two packages:
   `fr3_session.sh` rsyncs it and symlinks it into `~/franka_ws/src`.
 - `franka_streaming_impedance_client` (ament_python) — the producer side: builds the
   absolutely-timed `MultiDOFJointTrajectory` chunks the controller splices on. Symlinked into
-  `ros2_ws/src/` so colcon builds it on the laptop/lamb.
+  `ros2_ws/src/` so colcon builds it on the laptop/polyumi-server.
 
 **Fix bugs in that submodule upstream, not here** — PolyUMI is one of its consumers, not its
 owner, and a local edit is lost on the next submodule update. Changing it is a PR there plus a
@@ -225,9 +225,9 @@ bundle. What is NOT shared is `inference.yaml`'s `latency.gripper*`, still the F
 numbers — re-measure with `latency_probe --ros-args -p mode:=gripper_chirp`. Note the driver's own
 `max_width_mm` is persisted into `~/.ros/faulhaber_gripper_limits.json` at calibration time, so
 changing it needs a re-calibrate to take effect. See
-[docs/crb-fr3-inference.md](docs/crb-fr3-inference.md).
+[docs/lab-fr3-inference.md](docs/lab-fr3-inference.md).
 
-**When debugging FR3 inference on the arm — read [docs/crb-fr3-inference.md](docs/crb-fr3-inference.md)
+**When debugging FR3 inference on the arm — read [docs/lab-fr3-inference.md](docs/lab-fr3-inference.md)
 FIRST, especially "When it doesn't come up" and "Gripper problems", before re-diagnosing.** The common failure modes and
 their fixes are documented there: nothing publishing / Foxglove blank (a duplicate or leftover
 launch grabbing port 8765 + `/dev/video2` — `pkill` leftovers and confirm a single stack); TF
@@ -258,7 +258,7 @@ export`.
 
 **There are two forks, selected with `POLICY`** — `dp` (default,
 `external/polyumi_diffusion_policy`, visuomotor) and `vista`
-(`external/polyumi_vista_policy`, Rickmer's multimodal zoo: + finger camera + contact mic).
+(`external/polyumi_vista_policy`, a co-author's multimodal zoo: + finger camera + contact mic).
 The wiring is one file per fork in **`config/policy.<name>.env`** — fork directory, image tag,
 container entrypoint, dataset mount point, default `CONFIG_NAME` — resolved by `policy_select` in
 `build_policy_image.sh`, which `train_policy.sh` and `serve_policy.sh` both source. Those values
@@ -480,7 +480,7 @@ number came from, upstream behaviour we are matching, and gotchas a reader would
 Two more rules of thumb:
 
 - **Don't duplicate `docs/`.** For anything with a doc section (the FR3 troubleshooting modes
-  in `docs/crb-fr3-inference.md`, especially), state the mechanism in a sentence or two and
+  in `docs/lab-fr3-inference.md`, especially), state the mechanism in a sentence or two and
   point at the doc. Two copies of a narrative drift.
 - **If the explanation is longer than the code it explains, it is probably a doc, a commit
   message, or a docstring — not an inline comment.**

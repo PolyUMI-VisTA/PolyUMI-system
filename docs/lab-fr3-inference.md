@@ -1,16 +1,16 @@
-# CRB FR3 Inference Setup
+# Lab FR3 Inference Setup
 
-**Note for Northwestern CRB members**: This document describes how to run inference on the CRB lab's Franka FR3 arm (in the student office, connected to the NUC with the skull on it). 
+**Note for members of our lab**: This document describes how to run inference on our lab's Franka FR3 arm. 
 
-**Note for users outside of Northwestern**: This is specific to our equipment, but is likely still useful as an example to bring up an inference setup on your own arm.
+**Note for users outside our lab**: This is specific to our equipment, but is likely still useful as an example to bring up an inference setup on your own arm.
 
-**Everything from here down is for an assumed audience of "people in Northwestern CRB with access to this setup.**
+**Everything from here down is for an assumed audience of "people in our lab with access to this setup".**
 
 In general, to start exploring yourself, bring up the session as described below, after which the following commands are your friends:
 `ros2 topic list`, `ros2 action list`, `ros2 control list_controllers`, `ros2 param dump <node>`. See also the launch files in [`nuc/launch/`](../nuc/launch/) and
 [`ros2_ws/src/polyumi_ros2/launch/`](../ros2_ws/src/polyumi_ros2/launch/). 
 
-One note - my SSH alias for the NUC is "jailfranka", which is referred to sometimes in the docs below. 
+The SSH alias for the NUC is "polyumi-nuc", which is referred to sometimes in the docs below.
 
 ## Bringing up inference session
 
@@ -26,13 +26,13 @@ The following script at the root of the repo enables bringing up all of the func
 
 Safe commands run themselves; robot-moving ones are pre-typed for you to press Enter on. On
 every fresh start it rsyncs `nuc/` to the NUC, runs `./deploy.sh` for the Pi and
-`./deploy_lamb.sh` for lamb, so all three run this working copy (`SKIP_DEPLOY=1` skips it).
+`./deploy_server.sh` for polyumi-server, so all three run this working copy (`SKIP_DEPLOY=1` skips it).
 
-**lamb runs both the ROS client and the policy server.** This laptop is only a terminal, so it
-can sleep mid-run: the NUC and lamb panes are tmux *on those hosts*, and re-running the script
+**polyumi-server runs both the ROS client and the policy server.** This laptop is only a terminal, so it
+can sleep mid-run: the NUC and polyumi-server panes are tmux *on those hosts*, and re-running the script
 re-attaches. Per-host link settings — NIC, static IP, CycloneDDS config — live in
-`config/env.<hostname>.sh`, sourced by `setup_franka_env.sh`; lamb's are in
-`config/env.lamb.sh`. `./fr3_session.sh --kill` tears the whole wall down cleanly (a plain pane
+`config/env.<hostname>.sh`, sourced by `setup_franka_env.sh`; polyumi-server's are in
+`config/env.polyumi-server.sh`. `./fr3_session.sh --kill` tears the whole wall down cleanly (a plain pane
 kill sends SIGHUP, which leaves the Pi's LED lit and the inference container running).
 
 The script is essentially performing the following steps for you:
@@ -71,10 +71,10 @@ Velocity scaling is only applicable if the arm is being controlled by moveit, wh
 
 ## 3. Inference server
 
-`lamb` runs the policy server (port 8002) *and* the ROS client, so the client reaches it at
-`http://localhost:8002` and the request never crosses the dedicated cable. `./deploy_lamb.sh`
+`polyumi-server` runs the policy server (port 8002) *and* the ROS client, so the client reaches it at
+`http://localhost:8002` and the request never crosses the dedicated cable. `./deploy_server.sh`
 pushes this working copy and runs the three build steps a plain rsync leaves stale;
-`fr3_session.sh` calls it on every fresh start, so lamb runs what you have checked out.
+`fr3_session.sh` calls it on every fresh start, so polyumi-server runs what you have checked out.
 
 The dummy and the real server are the **same app** — `create_app` in the `polyumi_inference`
 library (`inference_server/`), which the ROS client imports too — with different backends. So a
@@ -83,9 +83,9 @@ one you would have seen in production. If you change anything about the request,
 both ends and both servers move together.
 
 ```bash
-# real policy, on lamb (see training-instructions.md):
+# real policy, on polyumi-server (see training-instructions.md):
 CKPT=/abs/path/to/<name>.ckpt ./serve_policy.sh
-curl http://localhost:8002/health             # from lamb, where the client also runs
+curl http://localhost:8002/health             # from polyumi-server, where the client also runs
 
 # or the dummy oscillator — no GPU, no checkpoint:
 cd inference_server && uv run dummy-server    # :8000
@@ -241,12 +241,12 @@ afterwards.)
   actually on `10.0.0.1`, nothing finds anything and there is no multicast fallback.
 - **The clocks must agree** or NUC-stamped TF lands outside the laptop's buffer
   ("extrapolation into the past"). The NUC's VLAN blocks outbound NTP, so its chrony syncs to the
-  laptop over the arm link; check with `ssh jailfranka chronyc sources` → `^* 10.0.0.1`.
+  laptop over the arm link; check with `ssh polyumi-nuc chronyc sources` → `^* 10.0.0.1`.
   `tf_use_latest:=true` is a stationary-dry-run crutch, never a fix.
 - **The Pi has the same requirement**, for a different reason: it stamps its camera and audio
   streams in epoch nanoseconds and `pi_receiver_node` publishes those as ROS headers verbatim, so
   a drifted Pi clock silently offsets every Pi-derived timestamp. It syncs to the ROS host, not to
-  the laptop — `ssh polyumi-pi chronyc sources` → `^* lamb`. The symptom is `pi_receiver_node`
+  the laptop — `ssh polyumi-pi chronyc sources` → `^* polyumi-server`. The symptom is `pi_receiver_node`
   logging "Pi camera/audio stamps are N.NNNs off this host's clock"; the setup is step 6 of
   [pi-provisioning.md](pi-provisioning.md), and `./deploy.sh` warns when the Pi has not selected
   a source, or has fallen back to its own clock.
@@ -302,7 +302,7 @@ Most failures here are one of four things, in rough order of frequency:
 
 ## The FAULHABER gripper (`gripper:=faulhaber`)
 
-`external/franka_gripper_control` is Anunth Ramaswami's CANopen driver for the FAULHABER-actuated
+`external/franka_gripper_control` is a co-author's CANopen driver for the FAULHABER-actuated
 gripper — a 200 Hz Cyclic Synchronous Position tracker where the Franka Hand is a decimator (see
 "Gripper problems"). Mechanically it is the same jaw: same PolyUMI fingers, same 0–0.0812 m stroke,
 new electronics.

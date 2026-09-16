@@ -6,7 +6,7 @@
 # FR3 NUC, and brings up the static IP on the wired link to the NUC via a
 # toggleable NetworkManager profile. Confined to this script so the default /
 # old-arm workflow is untouched when not sourced.
-# See docs/crb-fr3-inference.md for the full topology and rationale.
+# See docs/lab-fr3-inference.md for the full topology and rationale.
 
 # Abort if executed instead of sourced, before nmcli makes any changes — if we let execution
 # continue, the NM profile side effect would run but the exported env vars would be discarded
@@ -49,7 +49,7 @@ unset _polyumi_self
 # --- Wired link to the NUC ---
 # Host-specific: a machine other than this laptop is on a different NIC and usually a different
 # subnet entirely. Each such host keeps its values in config/env.<hostname>.sh (see
-# config/env.lamb.sh); the defaults below are this laptop's. Exported vars still win over both,
+# config/env.polyumi-server.sh); the defaults below are this laptop's. Exported vars still win over both,
 # so a one-off override works without editing anything.
 _polyumi_host_env="${POLYUMI_ROOT}/config/env.$(hostname -s).sh"
 if [ -f "$_polyumi_host_env" ]; then

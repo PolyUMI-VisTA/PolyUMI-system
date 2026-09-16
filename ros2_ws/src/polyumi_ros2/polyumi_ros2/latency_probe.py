@@ -126,7 +126,7 @@ GRIPPER_JOINT_NAME = 'fr3_gripper_width'
 HAND_DEADBAND_M = 0.005
 #: The Franka Hand's own floor: a Move blocks this long even for zero travel, and the node runs
 #: them to completion (it cannot pre-empt one). Not a configurable rate limit any more — this is
-#: the hardware. Measured with the franka_hand_testing probes; see docs/crb-fr3-inference.md.
+#: the hardware. Measured with the franka_hand_testing probes; see docs/lab-fr3-inference.md.
 HAND_PERIOD_S = 0.363
 HAND_MAX_WIDTH_M = 0.08
 
@@ -571,7 +571,7 @@ class LatencyProbe(Node):
         ``/fr3_gripper/joint_states`` headers, TF from the arm — are stamped on the NUC, so the
         laptop<->NUC offset lands in the result one-for-one. That is fine only because the two are
         chrony-disciplined to sub-ms over the 10.0.0.x link (see CLAUDE.md, "Clock sync"); if that
-        has drifted, these modes silently measure the drift. ``ssh jailfranka chronyc sources``
+        has drifted, these modes silently measure the drift. ``ssh polyumi-nuc chronyc sources``
         before believing a surprising number.
         """
         return self.get_clock().now().nanoseconds * 1e-9

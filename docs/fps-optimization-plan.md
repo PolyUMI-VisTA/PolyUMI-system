@@ -14,7 +14,7 @@ remaining obstacle.
 
 ## Test setup
 
-Measured 2026-08-29 on `conorpi` — Raspberry Pi Zero 2 W (4×A53 @ 1 GHz, 416 MB RAM,
+Measured 2026-08-29 on `polyumi-pi` — Raspberry Pi Zero 2 W (4×A53 @ 1 GHz, 416 MB RAM,
 VideoCore IV), IMX708 camera, RaspiAudio ULTRA++ HAT, "SD16G" SD card, scene at ~91 lux.
 `polyumi-pi.service` stopped for the duration so nothing else held the camera.
 

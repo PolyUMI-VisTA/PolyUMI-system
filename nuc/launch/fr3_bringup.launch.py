@@ -7,7 +7,7 @@
 #
 # What is deliberately NOT in here: move_group and the two PolyUMI bridges. Those live in
 # fr3_inference.launch.py, so this file can be restarted on its own — which matters, because
-# per docs/crb-fr3-inference.md ("When it doesn't come up") this is the component that crashes
+# per docs/lab-fr3-inference.md ("When it doesn't come up") this is the component that crashes
 # mid-session, and it is also the one gated on enabling FCI in the Desk UI by hand.
 
 """
@@ -17,7 +17,7 @@ Run on the NUC, after enabling FCI on the Desk UI:
 
     ros2 launch nuc/launch/fr3_bringup.launch.py
 
-See docs/crb-fr3-inference.md for the full bringup order and its gotchas.
+See docs/lab-fr3-inference.md for the full bringup order and its gotchas.
 """
 
 from pathlib import Path

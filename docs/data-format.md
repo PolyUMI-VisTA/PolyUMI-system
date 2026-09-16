@@ -4,7 +4,7 @@
 
 ## Purpose
 
-`pzarr` is the *working data format* for the PolyUMI preprocessing pipeline. It sits between raw ingest (mp4s, audio files, metadata json) and the training-ready exports (Northwestern CRB's diffusion policy zarr, LeRobot, MCAP). Pipeline steps modify it in place; once the pipeline is complete for a scene, you can archive the result.
+`pzarr` is the *working data format* for the PolyUMI preprocessing pipeline. It sits between raw ingest (mp4s, audio files, metadata json) and the training-ready exports (our lab's diffusion policy zarr, LeRobot, MCAP). Pipeline steps modify it in place; once the pipeline is complete for a scene, you can archive the result.
 
 Each `pzarr` corresponds to a single recorded scene, composed of one or many episodes (referred to as "sessions" in the pi app). Sessions are typed: `MAPPING` sessions are used to build the SLAM map; `EPISODE` sessions are the task demonstrations exported for training.
 
@@ -19,7 +19,7 @@ Compared to downstream data formats like LeRobot Dataset or Diffusion Policy's z
 
 ## Library and format version
 
-Use `zarr-python 3.x` with `zarr_format=2` explicitly. zarr-python 3 reads and writes v2 stores cleanly, but the v2 format gives us reliable JpegXl codec support (the v3 codec story for non-spec codecs has interop caveats) and matches the format that downstream tools like forge and CRB's `ReplayBuffer` already expect. If sharding becomes a real pain point as datasets grow, migrate to v3 later via `zarr.copy()`.
+Use `zarr-python 3.x` with `zarr_format=2` explicitly. zarr-python 3 reads and writes v2 stores cleanly, but the v2 format gives us reliable JpegXl codec support (the v3 codec story for non-spec codecs has interop caveats) and matches the format that downstream tools like forge and our lab's `ReplayBuffer` already expect. If sharding becomes a real pain point as datasets grow, migrate to v3 later via `zarr.copy()`.
 
 The format version is tracked as `pzarr_version` (currently `5`) in the scene root `.zattrs`. Read this from the store in your code rather than hardcoding it, so schema migrations are operational rather than code changes. See `ingest/polyumi_ingest/pzarr/version.py` for the version history.
 
@@ -203,7 +203,7 @@ Each `eef/pose_<source>` array records its own `world_frame`, `body_frame` (`han
 
 > **`T_gopro_to_fingertip` in `config/gripper_calib.yaml` is measured from the PolyUMI CAD assembly**, not from a calibration rig: its origin is the centre of the GoPro lens faceplate plus a 5 mm allowance for the sensor plane, and its target is the midpoint of the closed fingertips on the plane of the finger's upper surface. It is on the critical path for every exported pose, so re-derive it from CAD whenever the mount geometry changes.
 
-> **At inference**, the robot must report this same physical point — the policy compares like with like or not at all. On the FR3 that point is the `polyumi_tcp` frame, defined once in `nuc/tcp_calib.py` and named by both `eef_frame` (observation) and the MoveIt bridge's `eef_link` (command); the stock `fr3_hand_tcp` is a different point in a different axis convention. See [crb-fr3-inference.md](crb-fr3-inference.md).
+> **At inference**, the robot must report this same physical point — the policy compares like with like or not at all. On the FR3 that point is the `polyumi_tcp` frame, defined once in `nuc/tcp_calib.py` and named by both `eef_frame` (observation) and the MoveIt bridge's `eef_link` (command); the stock `fr3_hand_tcp` is a different point in a different axis convention. See [lab-fr3-inference.md](lab-fr3-inference.md).
 
 ## Gripper width from fiducials
 
@@ -322,6 +322,6 @@ So without the crop the inference 224² was **25.4% black pixels** with the real
 
 ## Why not LeRobotDataset v3? (etc)
 
-LeRobotDataset v3 is now the de facto OSS standard for sharing robot learning data, and it's a great fit for that use case — but it's a training/sharing format, not a working format. Its tabular Parquet layout assumes a single time grid per episode, the format is designed to be complete at write time rather than incrementally mutated by pipeline steps, and intermediate artifacts like SLAM atlases have no natural home. We treat it the same as CRB's diffusion policy zarr: an export target downstream of `pzarr`, not a replacement for it.
+LeRobotDataset v3 is now the de facto OSS standard for sharing robot learning data, and it's a great fit for that use case — but it's a training/sharing format, not a working format. Its tabular Parquet layout assumes a single time grid per episode, the format is designed to be complete at write time rather than incrementally mutated by pipeline steps, and intermediate artifacts like SLAM atlases have no natural home. We treat it the same as our lab's diffusion policy zarr: an export target downstream of `pzarr`, not a replacement for it.
 
-It is also deliberately *not* the same as CRB's diffusion policy format (`gen_dataset_hitl.py`). That format is downsampled, preprocessed, and single-rate; this one preserves full-rate multi-stream data with per-stream timestamps so SLAM and other steps have everything they need.
+It is also deliberately *not* the same as our lab's diffusion policy format (`gen_dataset_hitl.py`). That format is downsampled, preprocessed, and single-rate; this one preserves full-rate multi-stream data with per-stream timestamps so SLAM and other steps have everything they need.

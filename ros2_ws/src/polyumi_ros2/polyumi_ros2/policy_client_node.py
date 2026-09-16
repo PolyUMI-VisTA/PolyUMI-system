@@ -19,7 +19,7 @@ At each control tick the node:
      gripper half as a JointTrajectory on /polyumi/target_gripper (franka_hand_node). The two
      ride separate channels because the pose message carries no width and because the Franka Hand
      is action-only, so it needs a different execution cadence entirely — see
-     docs/crb-fr3-inference.md ("Gripper problems").
+     docs/lab-fr3-inference.md ("Gripper problems").
 
 Usage:
     ros2 run polyumi_ros2 policy_client_node
@@ -194,7 +194,7 @@ class PolicyClientNode(Node):
         self.declare_parameter('latency.gripper', 0.0)
         # --- Gripper ---
         # Source for agent_pos[7]. The FR3 publishes each finger at HALF the aperture, so the two
-        # positions are summed; see docs/crb-fr3-inference.md ("The facts you can't deduce by looking").
+        # positions are summed; see docs/lab-fr3-inference.md ("The facts you can't deduce by looking").
         self.declare_parameter('gripper_state_topic', '/fr3_gripper/joint_states')
         # If true, a tick with no gripper state is skipped (as a failed TF lookup is). Off by
         # default so setups without a hand — motion_only bringup, a bare arm — still run, feeding
@@ -754,7 +754,7 @@ class PolicyClientNode(Node):
         means this process is not reaching the NUC at all. tf2 cannot say that; its message reads
         like the arm dropped out mid-run. The usual cause is a shell rc exporting its own
         ROS_DOMAIN_ID over the one tmux inherited, so the DDS env goes in the message.
-        See docs/crb-fr3-inference.md.
+        See docs/lab-fr3-inference.md.
         """
         if self._tf_ever_ok:
             return

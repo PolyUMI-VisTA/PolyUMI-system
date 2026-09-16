@@ -39,7 +39,7 @@
       # NOT the ~200 ms YUYV->RGB convert: v4l2_camera stamps at dequeue and converts afterwards,
       # so that cost lands after the stamp. It is what max_image_age_s has to tolerate, not this.
       #
-      # calibrated 2026-08-11 on the crb's fr3 arm setup.
+      # calibrated 2026-08-11 on our lab's fr3 arm setup.
       gopro: 0.1087
 
       # Finger camera latency. Declared but never consumed — the policy has no tactile input

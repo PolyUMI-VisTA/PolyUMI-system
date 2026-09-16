@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Bring up the whole FR3 inference wall — NUC, Pi, lamb — as one tmux session.
+# Bring up the whole FR3 inference wall — NUC, Pi, polyumi-server — as one tmux session.
 #
 #     ./fr3_session.sh                # create (or re-attach to) the session
 #     SKIP_DEPLOY=1 ./fr3_session.sh  # ...without re-syncing the remote source trees first
 #     ./fr3_session.sh --kill-local   # tear down the LOCAL session only (remote ones survive)
 #     ./fr3_session.sh --kill         # ...and stop the remote sessions too
 #
-# This machine is only a terminal. ROS and the policy server both run on lamb, so the inference
+# This machine is only a terminal. ROS and the policy server both run on polyumi-server, so the inference
 # request never leaves that box and the laptop can sleep mid-run without consequence.
 #
 # WHAT AUTO-RUNS, AND WHAT ONLY GETS TYPED
@@ -42,17 +42,17 @@ SHELL_SETTLE_S="${SHELL_SETTLE_S:-5}"
 # A host and the repo path on it travel as a pair, so they are overridden as a pair — pointing
 # NUC_REPO somewhere new while still ssh'ing to the old box would be worse than not allowing it.
 # Repo paths are left unexpanded so the REMOTE shell resolves the tilde against its own $HOME.
-NUC_SSH_HOST="${NUC_SSH_HOST:-jailfranka}"
+NUC_SSH_HOST="${NUC_SSH_HOST:-polyumi-nuc}"
 NUC_REPO="${NUC_REPO:-~/Documents/PolyUMI}"
 # The NUC's franka_ros2 workspace. ~/franka_ws/src/franka_streaming_impedance_controller is a
 # symlink into $NUC_REPO/external (refreshed on every deploy below), so a build there picks up
 # whatever the rsync landed.
 NUC_FRANKA_WS="${NUC_FRANKA_WS:-~/franka_ws}"
 
-# lamb runs both the ROS client and the policy server. One host, one checkout, one sync.
-ROS_SSH_HOST="${ROS_SSH_HOST:-lamb}"
+# polyumi-server runs both the ROS client and the policy server. One host, one checkout, one sync.
+ROS_SSH_HOST="${ROS_SSH_HOST:-polyumi-server}"
 ROS_REPO="${ROS_REPO:-~/repos/PolyUMI}"
-# The Elgato's device node is lamb's USB enumeration, not this laptop's (which is /dev/video2,
+# The Elgato's device node is polyumi-server's USB enumeration, not this laptop's (which is /dev/video2,
 # the launch file's default). Confirm with `v4l2-ctl --list-devices` if a capture pane stalls.
 ROS_VIDEO_DEVICE="${ROS_VIDEO_DEVICE:-/dev/video0}"
 
@@ -172,7 +172,7 @@ else
   echo "WARNING: cannot reach the Pi at ssh alias '$POLYUMI_PI_HOST' (resolved: '${PI_HOST:-nothing}')." >&2
   echo "         Either the Pi is off, or the alias is not in your ssh config — in which case" >&2
   echo "         ssh hands back the alias verbatim and pi_host:= below will be wrong." >&2
-  echo "         Set it with:  POLYUMI_PI_HOST=conorpi ./fr3_session.sh" >&2
+  echo "         Set it with:  POLYUMI_PI_HOST=polyumi-pi ./fr3_session.sh" >&2
   echo "         Continuing; the Pi panes will just fail to connect." >&2
 fi
 
@@ -242,9 +242,9 @@ else
   fi
 
   # Whole tree, both builds, one script — also runnable by hand for a training-only push.
-  echo "==> Deploying to $ROS_SSH_HOST via ./deploy_lamb.sh ..."
-  if ! (cd "$REPO_DIR" && ./deploy_lamb.sh "$ROS_SSH_HOST" "$ROS_REPO"); then
-    echo "WARNING: deploy_lamb.sh failed — $ROS_SSH_HOST may run stale code, or fail to import" >&2
+  echo "==> Deploying to $ROS_SSH_HOST via ./deploy_server.sh ..."
+  if ! (cd "$REPO_DIR" && ./deploy_server.sh "$ROS_SSH_HOST" "$ROS_REPO"); then
+    echo "WARNING: deploy_server.sh failed — $ROS_SSH_HOST may run stale code, or fail to import" >&2
     echo "         polyumi_inference in policy_client_node." >&2
   fi
 fi
@@ -281,7 +281,7 @@ add_pane() {
 }
 
 # The NUC's two launch files get a pane each. Bringup is the crash-prone, FCI-gated piece and
-# must be restartable on its own (docs/crb-fr3-inference.md, "When it doesn't come up").
+# must be restartable on its own (docs/lab-fr3-inference.md, "When it doesn't come up").
 # RUN: safe, moves nothing, and everything else waits on it. If FCI is not enabled on the Desk
 # UI it fails loudly and you re-run it; that is cheap.
 add_pane nuc "$NUC_SSH_HOST" fr3-bringup window \
@@ -410,7 +410,7 @@ calibrated, find the hard stops once (SWEEPS THE FULL STROKE — clear the mecha
 It tracks nothing until that succeeds. The result persists in ~/.ros/ across launches.
 
 Running gripper:=hand? franka_hand_node logs every move(width, speed) it issues in pane 2, at
-0.7-1.7 Hz. That ceiling is the hand, not a fault: docs/crb-fr3-inference.md, "Gripper problems".
+0.7-1.7 Hz. That ceiling is the hand, not a fault: docs/lab-fr3-inference.md, "Gripper problems".
 
 tmux, minimum viable:
   C-b n / C-b p    next / previous window        C-b o     next pane

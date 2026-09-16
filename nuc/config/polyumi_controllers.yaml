@@ -5,7 +5,7 @@
 #
 # The controller is spawned INACTIVE. It claims the same <joint>/effort command interfaces as
 # fr3_arm_controller, so exactly one of the two can run: activating this one deactivates MoveIt's
-# path to the arm. See docs/crb-fr3-inference.md.
+# path to the arm. See docs/lab-fr3-inference.md.
 #
 # WHY EACH NUMBER IS WHAT IT IS lives upstream, in
 # external/franka_streaming_impedance_controller/config/controllers.example.yaml — the force

@@ -76,7 +76,7 @@ TCP_XYZ = (FINGERTIP_X, 0.0, FINGER_CARRIAGE_Z + CARRIAGE_TO_FINGERTIP_Z)
 
 # Rz(+90°), not -90°: the policy's y is the camera's "down", which points from the tagged upper
 # surface into the finger body, i.e. -x of fr3_hand. With z shared and x_policy = +y_hand, that
-# fixes the sign. Confirm it by eye in Foxglove anyway (docs/crb-fr3-inference.md).
+# fixes the sign. Confirm it by eye in Foxglove anyway (docs/lab-fr3-inference.md).
 TCP_RPY = (0.0, 0.0, math.pi / 2)
 
 # --------------------------------------------------------------------------------------------
@@ -103,7 +103,7 @@ TCP_RPY = (0.0, 0.0, math.pi / 2)
 #
 # The two FINGER joints are deliberately absent: fr3_finger_joint1/2 are PRISMATIC, so a static
 # transform would assert an aperture the fingers do not have. That is why there is still no finger
-# TF under load_gripper:=false — see docs/crb-fr3-inference.md.
+# TF under load_gripper:=false — see docs/lab-fr3-inference.md.
 HAND_STATIC_TRANSFORMS = (
     ('fr3_link8', 'fr3_hand', (0.0, 0.0, 0.0), (0.0, 0.0, -math.pi / 4)),
     ('fr3_hand', 'fr3_hand_tcp', (0.0, 0.0, 0.1034), (0.0, 0.0, 0.0)),

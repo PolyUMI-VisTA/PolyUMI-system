@@ -13,7 +13,7 @@ must match the training one because checkpoints are dill-pickled and unpickle ag
 dependency tree.
 
 There are **two forks** under `external/`, selected with `POLICY` (below): the visuomotor diffusion
-policy (`dp`, the default) and Rickmer's Vista multimodal zoo (`vista`). Most of this doc is
+policy (`dp`, the default) and a co-author's Vista multimodal zoo (`vista`). Most of this doc is
 written for `dp` — the flags, mounts and rootless gotchas are identical for both — with the
 Vista-specific parts in "Choosing a policy" and "Vista".
 
@@ -233,19 +233,19 @@ call it makes to the dummy server today, so nothing changes on the ROS side but 
 
 ## Vista
 
-`POLICY=vista` runs Rickmer's multimodal zoo — vision (`camera0_rgb`) + finger camera
+`POLICY=vista` runs the Vista multimodal zoo — vision (`camera0_rgb`) + finger camera
 (`finger_rgb`) + contact mic (`mic_0`) + proprioception, with an encoder / fusion / head /
 objective cross-product. Architecture, registries and the porting map are in the fork's
 [`docs/VISTA_AGENT_GUIDE.md`](../external/polyumi_vista_policy/docs/VISTA_AGENT_GUIDE.md).
 
-The submodule is **private** (`RiicK3d/polyumi_vista_policy`), so `git submodule update --init
+The submodule is **private** (`anon-authors/polyumi_vista_policy`), so `git submodule update --init
 external/polyumi_vista_policy` needs collaborator access.
 
-**lamb's copy is hand-managed, and `deploy_lamb.sh` deliberately does not sync it** — it is in
+**polyumi-server's copy is hand-managed, and `deploy_server.sh` deliberately does not sync it** — it is in
 that script's exclude list, and the deploy only checks that it is present. The checkpoints under
 `data/dp_outputs/` were trained against a working copy that is not any commit of the fork, so
-overwriting it by rsync makes them unloadable. Update lamb's copy by hand when you mean to, and
-expect a fresh lamb to need it put there by hand once.
+overwriting it by rsync makes them unloadable. Update polyumi-server's copy by hand when you mean to, and
+expect a fresh polyumi-server to need it put there by hand once.
 
 The entrypoint is `scripts/train_day0suite.sh`, a suite runner over eight models: four full
 multimodal (`vista`, `touch_in_the_wild`, `see_hear_feel`, `sparsh_x`), two vision-only

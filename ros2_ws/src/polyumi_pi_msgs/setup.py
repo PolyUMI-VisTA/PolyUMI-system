@@ -71,8 +71,8 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='conorbot',
-    maintainer_email='cwoodhayes@gmail.com',
+    maintainer='polyumi-authors',
+    maintainer_email='anonymous@example.com',
     description='Protobuf messages for communication with PolyTouch CE Finger',
     license='MIT',
     extras_require={

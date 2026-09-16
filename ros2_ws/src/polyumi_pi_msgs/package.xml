@@ -4,7 +4,7 @@
   <name>polyumi_pi_msgs</name>
   <version>0.0.1</version>
   <description>Protobuf messages for communication with PolyTouch CE Finger</description>
-  <maintainer email="cwoodhayes@gmail.com">conorbot</maintainer>
+  <maintainer email="anonymous@example.com">polyumi-authors</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>python3-grpc-tools</buildtool_depend>

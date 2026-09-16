@@ -7,7 +7,7 @@ these instead:
 
 | For | Read |
 |---|---|
-| How to run the stack, and what breaks | [crb-fr3-inference.md](crb-fr3-inference.md) |
+| How to run the stack, and what breaks | [lab-fr3-inference.md](lab-fr3-inference.md) |
 | Pose/gripper/image data conventions | [data-format.md](data-format.md) |
 | Measuring the constants | [calibration-instructions.md](calibration-instructions.md) |
 | The on-arm executor, and why torque control | `external/franka_streaming_impedance_controller/franka_streaming_impedance_controller/include/.../cartesian_impedance_controller.hpp` |
@@ -22,7 +22,7 @@ The pose/vision path is structurally complete end to end, and the streaming impe
 holds the arm through a synthetic trajectory. What remains is the policy end-to-end on the arm,
 the unwired tactile signals, and the training side. The Franka Hand is deprecated — it is being
 replaced — so its remaining work is tracked with the hand itself, in
-[crb-fr3-inference.md](crb-fr3-inference.md), not here.
+[lab-fr3-inference.md](lab-fr3-inference.md), not here.
 
 | Workstream | State |
 |---|---|
@@ -30,7 +30,7 @@ replaced — so its remaining work is tracked with the hand itself, in
 | Latency compensation, finger cam + piezo | **not started** — params declared, never consumed |
 | Pose body frame (training ↔ inference) | **done, verified on hardware** — `polyumi_tcp` end to end, CAD-measured, confirmed by `tcp_pivot_test` |
 | Camera pixel transform (training ↔ inference) | **done** — shared crop+resize contract, pinned by cross-environment golden digests |
-| Gripper command path | `franka_hand_node` written and unit-tested; **on-arm run pending** — tracked in [crb-fr3-inference.md](crb-fr3-inference.md), "Gripper problems", since the hand outlives this document |
+| Gripper command path | `franka_hand_node` written and unit-tested; **on-arm run pending** — tracked in [lab-fr3-inference.md](lab-fr3-inference.md), "Gripper problems", since the hand outlives this document |
 | Receding-horizon inference stride | **done** — `steps_per_inference` (default 6) |
 | DP export | **works**; UMI schema + tests landed. `export --type polyumi` adds the contact mic and the finger camera (`data/mic_0`, `data/finger_rgb`) |
 | Real inference server | **in progress** — `serve_policy.py` green standalone on the GPU box; client wiring done + unit-tested; on-arm dry run pending hardware |

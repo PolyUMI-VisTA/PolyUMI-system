@@ -40,9 +40,9 @@ def test_default_host_falls_back_without_env(monkeypatch):
 # metadata no longer says null, i.e. the ones finalize() has closed out, across every scene in
 # one round trip. The session still recording is absent from this list, which is the point.
 _FIND_OUT = """\
-/home/conor/recordings/scene_A/session_1/metadata.json
-/home/conor/recordings/scene_A/session_2/metadata.json
-/home/conor/recordings/scene_B/session_9/metadata.json
+/home/user/recordings/scene_A/session_1/metadata.json
+/home/user/recordings/scene_A/session_2/metadata.json
+/home/user/recordings/scene_B/session_9/metadata.json
 """
 
 

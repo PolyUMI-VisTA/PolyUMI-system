@@ -49,5 +49,5 @@ dev = [
     ]
 
 [tool.uv.sources]
-open-gopro = { git = "https://github.com/cwoodhayes/OpenGoPro", branch = "pi-trixie-fix", subdirectory = "demos/python/sdk_wireless_camera_control" }
+open-gopro = { git = "https://github.com/anon-authors/OpenGoPro", branch = "pi-trixie-fix", subdirectory = "demos/python/sdk_wireless_camera_control" }
 polyumi_pi_msgs = { path = "../ros2_ws/src/polyumi_pi_msgs", editable = true }

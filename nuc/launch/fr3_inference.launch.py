@@ -24,7 +24,7 @@ Run on the NUC, after fr3_bringup.launch.py is up:
 The streaming Cartesian impedance controller is loaded inactive and only ACTIVATED once
 `execute_arm:=true`; otherwise it sits loaded but idle and nothing moves.
 
-See docs/crb-fr3-inference.md for the full bringup order and its gotchas.
+See docs/lab-fr3-inference.md for the full bringup order and its gotchas.
 """
 
 from pathlib import Path
@@ -66,7 +66,7 @@ def generate_launch_description():
     activate_servo = PythonExpression(["'", execute_arm, "' == 'true'"])
 
     # Which hardware, and whether it is allowed to move, stay two separate questions: the
-    # first-run pattern in docs/crb-fr3-inference.md is a live gripper against a plan-only arm.
+    # first-run pattern in docs/lab-fr3-inference.md is a live gripper against a plan-only arm.
     def _selected(name: str) -> PythonExpression:
         return PythonExpression(["'", gripper, "' == '", name, "' and '", execute_gripper, "' == 'true'"])
 
@@ -100,7 +100,7 @@ def generate_launch_description():
                 default_value='192.168.51.20',
                 description='Hostname or IP of the FR3; forwarded to move_group.',
             ),
-            # Two execute flags, not one. docs/crb-fr3-inference.md recommends running the arm
+            # Two execute flags, not one. docs/lab-fr3-inference.md recommends running the arm
             # plan-only while the gripper executes for a first hardware run, so a bad width moves
             # fingers and nothing else — a single shared flag would take that away. Both default
             # false: launching this file must never move the robot on its own.

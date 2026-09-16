@@ -1,18 +1,18 @@
 [submodule "external/ORB_SLAM3_PolyUMI"]
 	path = external/ORB_SLAM3_PolyUMI
-	url = https://github.com/cwoodhayes/ORB_SLAM3_PolyUMI.git
+	url = https://github.com/anon-authors/ORB_SLAM3_PolyUMI.git
 [submodule "external/franka_ros2"]
 	path = external/franka_ros2
 	url = https://github.com/frankarobotics/franka_ros2.git
 [submodule "external/polyumi_diffusion_policy"]
 	path = external/polyumi_diffusion_policy
-	url = https://github.com/cwoodhayes/polyumi_diffusion_policy.git
+	url = https://github.com/anon-authors/polyumi_diffusion_policy.git
 [submodule "external/franka_gripper_control"]
 	path = external/franka_gripper_control
-	url = https://github.com/anunthramaswami2030/franka_gripper_control.git
+	url = https://github.com/anon-authors/franka_gripper_control.git
 [submodule "external/polyumi_vista_policy"]
 	path = external/polyumi_vista_policy
-	url = https://github.com/RiicK3d/polyumi_vista_policy.git
+	url = https://github.com/anon-authors/polyumi_vista_policy.git
 [submodule "external/franka_streaming_impedance_controller"]
 	path = external/franka_streaming_impedance_controller
-	url = https://github.com/cwoodhayes/franka_streaming_impedance_controller.git
+	url = https://github.com/anon-authors/franka_streaming_impedance_controller.git

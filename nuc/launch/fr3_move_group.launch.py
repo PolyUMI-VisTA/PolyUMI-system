@@ -42,7 +42,7 @@
 #      fr3_arm group, which doesn't include the fingers.
 #      Fixing it for real means decoupling hand: from load_gripper: in fr3_bringup's own
 #      robot_description, which is a bigger, riskier change than a log line justifies.
-# See docs/crb-fr3-inference.md for how to run this and the gotchas around it.
+# See docs/lab-fr3-inference.md for how to run this and the gotchas around it.
 
 """Launch a standalone MoveIt move_group for the FR3, alongside a running fr3-bringup."""
 

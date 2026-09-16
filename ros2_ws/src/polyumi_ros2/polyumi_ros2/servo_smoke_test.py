@@ -14,7 +14,7 @@ The path is a circle traced around wherever the TCP already is, at a speed you c
 Orientation is held: a wrong orientation would be a second variable in a test that exists to isolate
 one.
 
-    # NUC: fr3_bringup up, impedance controller ACTIVE (docs/crb-fr3-inference.md)
+    # NUC: fr3_bringup up, impedance controller ACTIVE (docs/lab-fr3-inference.md)
     ros2 run polyumi_ros2 servo_smoke_test
     ros2 run polyumi_ros2 servo_smoke_test --ros-args -p radius_m:=0.05 -p period_s:=6.0
 

@@ -100,7 +100,7 @@ keep arriving and every latency computed from them is quietly wrong by the drift
 
 Sync the Pi **to the machine running the ROS nodes**, not to a public pool. That host is the one
 whose clock the timestamps are compared against, so agreeing with it matters more than either
-machine agreeing with UTC. In this lab that host is `lamb`; yours will be something else.
+machine agreeing with UTC. In this lab that host is `polyumi-server`; yours will be something else.
 Substitute your own hostnames throughout.
 
 The stock image does not do this for you. Raspberry Pi OS ships `systemd-timesyncd`, which syncs to a public pool over SNTP and is not configurable in the same way chrony is.
@@ -111,7 +111,7 @@ chrony against the ROS host replaces it and gets this to sub-millisecond:
 sudo apt install -y chrony
 
 # Sync to the ROS host, preferring it over anything else configured:
-echo 'server lamb iburst prefer' | sudo tee /etc/chrony/conf.d/ros-host-time.conf
+echo 'server polyumi-server iburst prefer' | sudo tee /etc/chrony/conf.d/ros-host-time.conf
 sudo systemctl restart chrony
 
 # On the ROS host — serve time to the Pi's subnet:
@@ -126,7 +126,7 @@ Verify from your PC — the `^*` marks the source actually selected, and the off
 sub-millisecond:
 
 ```bash
-ssh polyumi-pi chronyc sources    # expect: ^* lamb
+ssh polyumi-pi chronyc sources    # expect: ^* polyumi-server
 ssh polyumi-pi chronyc tracking   # expect: Leap status : Normal
 ```
 

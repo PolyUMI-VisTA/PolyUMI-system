@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# deploy_lamb.sh - Push this working copy to the GPU box, and build what runs there.
-# Usage: ./deploy_lamb.sh [ssh_hostname] [remote_repo_path]
+# deploy_server.sh - Push this working copy to the GPU box, and build what runs there.
+# Usage: ./deploy_server.sh [ssh_hostname] [remote_repo_path]
 #
-# lamb runs BOTH halves of inference — the ROS client (policy_client_node, the camera, Foxglove)
+# polyumi-server runs BOTH halves of inference — the ROS client (policy_client_node, the camera, Foxglove)
 # and the policy server (serve_policy.sh, the diffusion-policy fork in Docker) — plus training.
 # So it gets the whole tree rather than a curated subset, and the three build steps that a plain
 # rsync leaves stale.
@@ -13,22 +13,22 @@
 
 set -euo pipefail
 
-HOST="${1:-${ROS_SSH_HOST:-lamb}}"
+HOST="${1:-${ROS_SSH_HOST:-polyumi-server}}"
 # Left unexpanded so the REMOTE shell resolves the tilde against its own $HOME.
 REPO="${2:-${ROS_REPO:-~/repos/PolyUMI}}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "==> Syncing repo to ${HOST}:${REPO} ..."
-# --delete, so a file removed here is removed there — a stale serve_obs.py on lamb is the kind of
+# --delete, so a file removed here is removed there — a stale serve_obs.py on polyumi-server is the kind of
 # thing that produces a plausible-looking rollout against last week's frame convention.
 #
-# data/, recordings/ and wandb/ are lamb's OUTPUT — data/ holds dp_outputs, i.e. every checkpoint.
+# data/, recordings/ and wandb/ are polyumi-server's OUTPUT — data/ holds dp_outputs, i.e. every checkpoint.
 # rsync protects excluded paths from --delete, which is the only reason they survive this.
 # They are ANCHORED with a leading slash: an unanchored 'data/' matches at every depth, which
 # silently drops a fork's own package directory (external/polyumi_vista_policy/vista/data/) and
 # leaves the remote building against a tree missing files that exist here.
-# external/ORB_SLAM3_PolyUMI is 2 GB of ingest-side C++ that nothing on lamb runs.
-# external/polyumi_vista_policy is hand-managed ON lamb: the checkpoints under data/dp_outputs/
+# external/ORB_SLAM3_PolyUMI is 2 GB of ingest-side C++ that nothing on polyumi-server runs.
+# external/polyumi_vista_policy is hand-managed ON polyumi-server: the checkpoints under data/dp_outputs/
 # were trained against a working copy that is not any commit of the fork, and overwriting it makes
 # them unloadable. The dp fork under external/ DOES ship.
 
@@ -62,7 +62,7 @@ ssh "${HOST}" "
     test -f ${REPO}/inference_server/polyumi_inference/wire.py
     test -f ${REPO}/docker/polyumi_inference.Dockerfile
     echo '    fork + polyumi_inference present'
-    # Not synced (see the exclude above) — this only confirms lamb's hand-managed copy is intact,
+    # Not synced (see the exclude above) — this only confirms polyumi-server's hand-managed copy is intact,
     # which is worth catching now rather than as a stage-1 build failure 20 minutes in.
     if [ -d ${REPO}/external/polyumi_vista_policy ]; then
         test -f ${REPO}/external/polyumi_vista_policy/Dockerfile

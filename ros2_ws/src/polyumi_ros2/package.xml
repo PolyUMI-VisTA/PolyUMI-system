@@ -4,7 +4,7 @@
   <name>polyumi_ros2</name>
   <version>0.0.1</version>
   <description>Core ROS2 python nodes for the PolyUMI multimodal learning platform</description>
-  <maintainer email="cwoodhayes@gmail.com">conorbot</maintainer>
+  <maintainer email="anonymous@example.com">polyumi-authors</maintainer>
   <license>MIT</license>
 
   <!-- ament_copyright / ament_flake8 / ament_pep257 were dropped: this repo lints Python with
@@ -16,7 +16,7 @@
 
   <!-- The Franka stack (franka_bringup / franka_fr3_moveit_config) runs on the
        FR3 NUC under ROS2 Humble, NOT in this Kilted workspace. It is reached
-       over DDS, so it is intentionally not a rosdep here. See docs/crb-fr3-inference.md. -->
+       over DDS, so it is intentionally not a rosdep here. See docs/lab-fr3-inference.md. -->
   <exec_depend>foxglove_bridge</exec_depend>
   <exec_depend>v4l2_camera</exec_depend>
   <depend>polyumi_pi_msgs</depend>
