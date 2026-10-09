@@ -29,7 +29,7 @@ external/         # Git submodules
                             #   /polyumi/target_gripper contract unmodified
   franka_ros2/              # ROS2 control stack for Franka Emika Panda robot arm
   ORB_SLAM3_PolyUMI/        # PolyUMI's ORB_SLAM3 fork (monocular visual-inertial SLAM for the GoPro Hero 12)
-  polyumi_diffusion_policy  # control policy implementations, dockerized & wrapped in an API server
+  polyumi_diffusion_policy/ # control policy implementations, dockerized & wrapped in an API server
   franka_streaming_impedance_controller/  # custom impedance controller for the Franka FR3
   polyumi_vista_policy/     # under development: dockerized vision-tactile-audio policies
 inference_server/ # polyumi_inference: the inference wire protocol and both ends of it
@@ -313,9 +313,6 @@ If you find our work useful, please consider citing us!
       url={https://arxiv.org/abs/2609.29760},
 }
 ```
-
-If you wish to cite the full tactile learning system (including models, datasets, inference pipeline, etc),
-please let us know, as this will be released in an upcoming work.
 
 ## Acknowledgments & Maintenance
 
