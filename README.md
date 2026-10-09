@@ -2,8 +2,8 @@ https://github.com/user-attachments/assets/2f902600-9682-4e67-a75c-fc8fa358cb92
 
 # PolyUMI: Visual + Auditory + Tactile Manipulation Platform for Imitation Learning
 
-**Project website:** https://cwoodhayes.github.io/projects/polyumi<br>
-**Hardware build guide:** [Google Doc](https://docs.google.com/document/d/1T0v_7H8YAJjOud9QWYlQct29a78YKvELPIpKTzajFs0/edit?usp=sharing)
+**Project website:** https://polyumi-vista.github.io/<br>
+**Hardware build guide (incl. CAD files, BOM, etc):** [Google Doc](https://docs.google.com/document/d/1T0v_7H8YAJjOud9QWYlQct29a78YKvELPIpKTzajFs0/edit?usp=sharing)
 
 PolyUMI is an imitation learning platform supporting UMI-style data collection via a handheld gripper, which unifies the following sensor modalities in a single end-effector:
 - **touch** (via a custom optical tactile-sensing finger, based on [PolyTouch](https://polytouch.alanz.info/)) - *10fps 540x480 MJPEG video (MP4)*
@@ -13,16 +13,11 @@ PolyUMI is an imitation learning platform supporting UMI-style data collection v
 
 It combines the [Universal Manipulation Interface (UMI)](https://umi-gripper.github.io/) platform with a custom touch-sensing finger inspired by the [PolyTouch tactile + audio sensor](https://polytouch.alanz.info/), with hardware, firmware, and software designed from scratch for modularity and hardware performance on a modern robotics stack (ROS2 Kilted/Humble, Python 3.13, Foxglove).
 
-<div align="center" style="display: flex; flex-wrap: wrap; gap: 12px; justify-content: center;">
-  <div style="flex: 1 1 480px; min-width: 320px; max-width: 600px;">
-    <img src="docs/dataflow_overview.png" alt="Dataflow Overview" style="width: 100%;"/>
-    <p style="margin: 6px 0 0; font-size: 0.9em; color: #666;">Data flow through the PolyUMI system.</p>
-  </div>
-  <div style="flex: 1 1 480px; min-width: 320px; max-width: 600px;">
-    <img src="docs/polyumi sw components.png" alt="Software Components" style="width: 100%;"/>
-    <p style="margin: 6px 0 0; font-size: 0.9em; color: #666;">General summary of software components in this repo.</p>
-  </div>
-</div>
+![PolyUMI system overview](docs/system_v2.jpg)
+> Sensing capabilities and hardware platform.
+
+![System architecture](docs/inference_architecture.png)
+> Inference system architecture contained in this repo
 
 ## Repo Structure
 
@@ -35,6 +30,8 @@ external/         # Git submodules
   franka_ros2/              # ROS2 control stack for Franka Emika Panda robot arm
   ORB_SLAM3_PolyUMI/        # PolyUMI's ORB_SLAM3 fork (monocular visual-inertial SLAM for the GoPro Hero 12)
   polyumi_diffusion_policy  # control policy implementations, dockerized & wrapped in an API server
+  franka_streaming_impedance_controller/  # custom impedance controller for the Franka FR3
+  polyumi_vista_policy/     # under development: dockerized vision-tactile-audio policies
 inference_server/ # polyumi_inference: the inference wire protocol and both ends of it
                   #   (the ROS client imports it; so does the policy server. See docs/crb-fr3-inference.md)
 infra/            # RPi provisioning infrastructure (see docs/pi-provisioning.md)
@@ -48,7 +45,7 @@ ros2_ws/
     polyumi_ros2/      # ROS 2 nodes + Foxglove launch files
 ```
 
-**Additional scripts:**
+**Additional important scripts:**
 ```
 deploy.sh           # deploys code updates to the pi
 fr3_session.sh      # brings up tmux sessions for inference on the CRB's arm
@@ -303,15 +300,17 @@ Run `polyumi-pi --help` for a full list of commands.
 
 ## Citation
 
-If you just want to use PolyUMI's hardware designs + associated system software (i.e. the pi application), please cite the original workshop paper:
+If you find our work useful, please consider citing us!
 
 ```bibtex
-@inproceedings{hayes2026polyumi,
-  title     = {PolyUMI: Visual + Auditory + Tactile Manipulation Platform for Imitation Learning},
-  author    = {Hayes, Conor Wood},
-  booktitle = {IEEE ICRA 2026 Workshop on Contact-Rich Robotic Manipulation (CR2)},
-  year      = {2026},
-  url       = {https://openreview.net/forum?id=Ou39QMiCMP}
+@misc{hayes2026polyumiaccessiblevisualtactileaudiodata,
+      title={PolyUMI: Accessible Visual-Tactile-Audio Data Collection for Object Inference and Manipulation},
+      author={Conor W. Hayes and Rickmer Krohn and Aravind Ramaswami and Anunth Ramaswami and Nils Dengler and Kevin M. Lynch and J. Edward Colgate and Georgia Chalvatzaki and Matthew L. Elwin},
+      year={2026},
+      eprint={2609.29760},
+      archivePrefix={arXiv},
+      primaryClass={cs.RO},
+      url={https://arxiv.org/abs/2609.29760},
 }
 ```
 
@@ -320,6 +319,6 @@ please let us know, as this will be released in an upcoming work.
 
 ## Acknowledgments & Maintenance
 
-This project was originally developed by Conor Wood Hayes as part of the Master of Science in Robotics (MSR) program at Northwestern University.
+This project was originally developed by [Conor Wood Hayes](https://cwoodhayes.github.io) as part of the Master of Science in Robotics (MSR) program at Northwestern University. Writeups about his initial bringup of the gripper, training, and the end-to-end system are [here](https://cwoodhayes.github.io/projects/polyumi-policy) and [here](https://cwoodhayes.github.io/projects/polyumi).
 
 It is currently maintained by the **[Center for Robotics and Biosystems](https://robotics.northwestern.edu/)** at Northwestern University.
