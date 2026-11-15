@@ -29,8 +29,8 @@
     # on the order of ONE stride (steps_per_inference * 1/control_hz = 0.3s here), which smooths the
     # handoff between consecutive chunks without averaging over a meaningfully stale window.
     #
-    # Starting point, not a measured value: tune it against measured jerk with the A/B procedure in
-    # ingest/integration/plot_measured_motion.py, the same way the interpolant was.
+    # Starting point, not a measured value: tune it against measured jerk, A/B, with the arm's
+    # own motion. (The plot_measured_motion.py helper that did this was removed upstream.)
     temporal_ensemble_tau_s: 0.0
 
     # --- Per-component latencies, in seconds. ---
