@@ -14,13 +14,11 @@ Two things are deliberately different from the reference formulation:
   measured inference latency varies from ~100 ms to ~400 ms — so "two chunks ago" is not a fixed
   amount of staleness, while ``exp(-age_s / tau_s)`` is.
 - **The output keeps the newest chunk's own time grid.** Action ``i`` still targets
-  ``t_obs + i * action_dt``, so every downstream consumer — the stale-drop, ``first_index``, the
-  anchor stamp, the interpolator on the NUC — is unaffected. Only the values change.
+  ``t_obs + i * action_dt``, so every downstream consumer is unaffected; only the values change.
 
 What this does NOT fix: it smooths disagreement between successive predictions, it does not make
-any single prediction better. Blending is a trade of reactivity for smoothness — a larger
-``tau_s`` averages in staler predictions, so the arm responds more slowly to genuinely new
-information. For contact-critical work, keep it on the order of one replan interval.
+any single prediction better. Choosing ``tau_s`` is a reactivity-for-smoothness trade; the
+reasoning and the shipped value are in ``config/inference.yaml``.
 
 The gripper width is blended on the same weights as the pose. That does soften a crisp close
 across a replan boundary; it is uniform with the rest of the action vector rather than a special
@@ -102,9 +100,8 @@ class TemporalEnsembler:
         :param t_obs: absolute instant the chunk's observation was captured, seconds. Action ``i``
             of ``actions`` targets ``t_obs + i * action_dt``.
         :param actions: ``(n, 8)`` chunk as returned by the policy.
-        :return: ``(n, 8)`` blended chunk on the same time grid. The newest chunk is returned
-            unchanged when it is the only one that covers an instant, which includes every
-            instant past the end of the previous chunks and the whole first chunk of an episode.
+        :return: ``(n, 8)`` blended chunk on the same time grid. Instants no older chunk covers
+            come back unchanged, which is every instant past the end of the previous chunks.
         """
         if not self.enabled or len(actions) == 0:
             return actions

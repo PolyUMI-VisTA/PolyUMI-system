@@ -2,8 +2,8 @@
 
 PolyUMI depends on some hardcoded constants to run inference. Where possible, scripts are included in the repo to produce correctly calibrated values for these.
 Some of these constants
-should generally be the same from setup to setup (ie the gripper width offset), 
-while others may be substantially different (sensor + arm execution latencies). 
+should generally be the same from setup to setup (ie the gripper width offset),
+while others may be substantially different (sensor + arm execution latencies).
 
 Here is a quick doc detailing the calibration procedures for the system & where to find the associated values:
 
@@ -71,7 +71,7 @@ For the training constant, measure the center of the GoPro model's lens plate ->
 camera sensor plane's position. The constant is expressed in gopro optical frame.
 For the inference constant, this is split into a few values to help clarify how it was calculated. The only confusing part is locating the fr3_hand coordinate in the cad; I used the center of the gripper finger track on the Franka Hand CAD model, which I then verified using the pivot test (see below).
 
-**Hardware verification (sanity checks):** 
+**Hardware verification (sanity checks):**
 
 For the training constants, you should be able to view the resulting frame in Foxglove for any sessions you recorded; check this visually.
 
@@ -117,7 +117,7 @@ ros2 topic echo /franka_robot_state_broadcaster/robot_state --field o_f_ext_hat_
 To iterate without relaunching, `SetLoad` can be called by hand — but **only while no controller holds the arm.** With one active the robot is in `Move` mode and rejects it outright, so deactivate first and reactivate after. Note also that `center_of_mass` on the wire is in **`fr3_link8`** while `PAYLOAD_COM_HAND` is in `fr3_hand` — `tcp_calib.payload_com_flange()` does that conversion, and `tcp_calib.set_load_request()` prints the whole request literal for you. Write the winning numbers into `nuc/tcp_calib.py` when you're done.
 
 What you really want to see, though, is that when you launch fr3_inference.launch.py,
-(which starts the impedance controller upon first launch after the bringup), 
+(which starts the impedance controller upon first launch after the bringup),
 that the fingertip doesn't move at all in any direction, by rotation or translation, at _any position of the arm_.
 
 You can kind of move the arm into different positions to back out if your CoM is at the wrong place once you have the
@@ -172,7 +172,7 @@ In addition to the strictly necessary offsets above, we also measure & track the
 
 #### Part 1 — the handheld side (closed width)
 
-1. **Record a calibration scene.** Open and close the gripper fully in front of the GoPro, several times, **holding it shut for a few seconds each cycle**. 
+1. **Record a calibration scene.** Open and close the gripper fully in front of the GoPro, several times, **holding it shut for a few seconds each cycle**.
 
 2. **Run preprocessing, then the calibration:**
    ```bash
@@ -205,7 +205,7 @@ past 0.023 m.
 
 #### Sanity check
 
-You should look at the gripper in CAD & make sure the distance between the ARUCO tags is about the same as the one you measured. 
+You should look at the gripper in CAD & make sure the distance between the ARUCO tags is about the same as the one you measured.
 
 Currently, the handheld gripper opens ~6 mm wider than the arm can, so the top ~7% of the policy's commanded range saturates at `gripper_max_width_m`. That is expected, shows up as the policy's intent clipping rather than as an error, and is inherent to the two mechanisms having different strokes. A gap of *centimetres*, or the arm appearing to open wider than the handheld, means one of the two measurements is wrong.
 
