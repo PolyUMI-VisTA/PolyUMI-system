@@ -242,10 +242,6 @@ robot and lab. The protocol — the wire format, the client, and the server app 
 [docs/crb-fr3-inference.md](docs/crb-fr3-inference.md) is a worked example for one
 specific Franka FR3 setup that you can adapt.
 
-**Serving a checkpoint** means getting `POLICY`, `SERVE_TACTILE`, `send_tactile` and
-`n_audio_rows` to agree, and most of those fail *silently* when wrong — the policy just runs on a
-frame it was never trained on. There is no tooling for this; set them together, by hand.
-
 `ros2_ws/src/polyumi_ros2/scripts/record_eval_trial.sh` records one evaluation trial as a rosbag,
 into a per-policy folder.
 
@@ -257,14 +253,6 @@ Humble/Kilted boundary.
 ## Hardware Notes
 
 The Raspberry Pi app in `pi/` also depends upon a custom fork of [OpenGoPro](https://github.com/cwoodhayes/OpenGoPro) with some specific extra capabilities & one bugfix; without these the library cannot connect over BLE on Debian Trixie (and its downsteam RPi fork which we are using.)
-
-### Contact mic
-
-The finger piezo can stop converting partway through a capture and latch to a constant, while
-ALSA still reports `RUNNING` and `arecord` still exits 0 — so the recording looks like a plausible
-quiet signal. [docs/contact-mic-audio.md](docs/contact-mic-audio.md) is the investigation record:
-what was measured, what was ruled out, what is still open, and the `pi/alsa_preset` routing and
-gains that follow from it. Read it before changing the capture routing.
 
 ### PiSugar Battery
 
@@ -344,8 +332,20 @@ If you just want to use PolyUMI's hardware designs + associated system software 
 }
 ```
 
-If you wish to cite the full tactile learning system (including models, datasets, inference pipeline, etc),
-please let us know, as this will be released in an upcoming work.
+If you wish to cite the full tactile learning system, please cite this paper:
+
+```bibtex
+@article{hayes2026polyumi,
+  title   = {PolyUMI: Accessible Visual-Tactile-Audio Data Collection
+             for Object Inference and Manipulation},
+  author  = {Hayes, Conor W. and Krohn, Rickmer and Ramaswami, Aravind
+             and Ramaswami, Anunth and Dengler, Nils and Lynch, Kevin M.
+             and Colgate, J. Edward and Chalvatzaki, Georgia
+             and Elwin, Matthew L.},
+  journal = {arXiv preprint arXiv:2609.29760},
+  year    = {2026}
+}
+```
 
 ## Acknowledgments & Maintenance
 

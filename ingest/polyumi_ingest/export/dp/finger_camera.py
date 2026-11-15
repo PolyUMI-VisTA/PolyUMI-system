@@ -28,29 +28,23 @@ class FingerCameraModality(ExportModality):
     """
     The gripper's finger camera on the exported step grid, as ``finger_rgb``.
 
-    Cropped, not resized, by default: the mount occludes a fixed strip of the view that carries
-    no signal, and choosing the encoder's input size belongs with whoever builds the policy. Both
-    the crop and the optional resize come from ``config/finger_camera.yaml`` and are applied here
-    rather than in a preprocessing step, so retuning the crop is a re-export rather than a
-    re-preprocess of the corpus — which matters while the bounds are still an estimate.
+    Cropped, not resized, by default: the mount occludes a fixed strip carrying no signal, and the
+    encoder's input size belongs with whoever builds the policy. Crop and optional resize come from
+    ``config/finger_camera.yaml`` and are applied here, so retuning them is a re-export rather than
+    a re-preprocess of the corpus.
 
-    The finger camera records at ~10 fps against a ~30 Hz step grid, so each step takes the newest
-    frame at or before it and roughly three consecutive rows share one source frame. That is the
-    honest resample — nothing is interpolated — but it means a training config wants
-    ``down_sample_steps`` set accordingly, or an observation window fetches the same image twice.
-    The measured source rate is recorded in the buffer's meta attrs so this is visible from the
-    dataset alone.
+    The camera records at ~10 fps against a ~30 Hz step grid, so each step takes the newest frame
+    at or before it and roughly three rows share one source frame. Nothing is interpolated, but a
+    training config wants ``down_sample_steps`` set accordingly or a window fetches the same image
+    twice. The measured source rate is in the buffer's meta attrs.
 
-    It also stops recording before the GoPro does — measured at ~0.65 s across 111 episodes, with
-    a further ~1 s of GoPro lead at the start that the chirp trim already removes. Steps past the
-    end of the stream are excluded via :meth:`valid_steps` rather than exported: the causal index
-    clamps, so exporting them would pair one frozen frame with moving proprioception, and failing
-    the episode outright would fail every episode.
+    It also stops recording ~0.65 s before the GoPro does (measured over 111 episodes). Steps past
+    the end are excluded by :meth:`valid_steps`: the causal index clamps, so exporting them would
+    pair a frozen frame with moving proprioception.
 
-    Selection is causal so that training and inference see the same pairing; see
-    :meth:`prepare_episode`. Because it only looks back, staleness now runs up to a full frame
-    period rather than half of one, and ``max_staleness_s`` in ``config/finger_camera.yaml`` has to
-    cover that.
+    Selection is causal so training and inference pair the same way; see :meth:`prepare_episode`.
+    Looking back only, staleness runs up to a full frame period rather than half, which
+    ``max_staleness_s`` has to cover.
     """
 
     name = FINGER_KEY

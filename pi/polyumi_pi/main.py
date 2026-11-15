@@ -1,11 +1,14 @@
 """
-pi_streamer.py - Runs on the Raspberry Pi Zero 2W.
+The `polyumi-pi` CLI - every Pi-side operation, run on the Raspberry Pi Zero 2W.
 
-Streams MJPEG frames over ZMQ to pi_receiver_node on the host PC.
+Typer app behind the `polyumi-pi` entry point (pi/pyproject.toml). It streams MJPEG frames and
+contact-mic audio over ZMQ to `pi_receiver_node` on the host PC, records episodes and scenes to
+disk, and drives the GoPro over BLE.
 
 Usage:
-    python pi_streamer.py stream
-    python pi_streamer.py stream --port 5555 --width 640 --height 480
+    polyumi-pi --help
+    polyumi-pi stream
+    polyumi-pi stream --port 5555 --width 640 --height 480
 """
 
 import asyncio

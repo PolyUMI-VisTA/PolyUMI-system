@@ -27,7 +27,8 @@ AGENT_POS_CHANNEL = 'agent_pos'
 FINGER_CHANNEL = 'finger_rgb'
 #: The contact mic. Alone among the channels this is NOT one entry per observation step: its
 #: leading dim is the policy's ``audio_obs_horizon``, a training-time constant that need not equal
-#: ``n_obs_steps`` (17 against 2 for the Vista family), because the mic updates far faster than
+#: ``n_obs_steps`` (10 against 2 for the Vista family; 17 before the 2026-09-07 realignment),
+#: because the mic updates far faster than
 #: the control loop and the policy consumes a window of rows rather than one row per step.
 MIC0_CHANNEL = 'mic_0'
 #: Samples in one ``mic_0`` row: 33.5 ms at 16 kHz. Fixed by the dataset's own blocking, so it is

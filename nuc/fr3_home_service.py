@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-FR3 homing service — runs ON THE NUC (ROS 2 Humble).
+FR3 home/set-home services — runs ON THE NUC (ROS 2 Humble).
 
-Serves /polyumi/home (std_srvs/Trigger): a joint-space move to the SRDF `ready` pose, planned
-and executed through the LOCAL move_group. This node must run on the NUC, not the laptop: the
-laptop (rmw_cyclonedds 4.0.2, Kilted) and the NUC (rmw_cyclonedds 1.3.4, Humble) can exchange
-small messages fine, but the large nested MoveIt action goals (MoveGroup.Goal /
-ExecuteTrajectory.Goal) get corrupted across the rmw-major boundary ("invalid data size, at
-serdata.cpp:384" -> move_group "Catastrophic failure"). Keeping the move_group calls same-rmw
-(NUC-local) avoids that.
+Serves /polyumi/home (std_srvs/Trigger): a joint-space move to the stored home pose (the SRDF
+`ready` pose until one is taught), planned and executed through the LOCAL move_group. This node
+must run on the NUC, not the laptop: the laptop (rmw_cyclonedds 4.0.2, Kilted) and the NUC
+(rmw_cyclonedds 1.3.4, Humble) can exchange small messages fine, but the large nested MoveIt
+action goals (MoveGroup.Goal / ExecuteTrajectory.Goal) get corrupted across the rmw-major boundary
+("invalid data size, at serdata.cpp:384" -> move_group "Catastrophic failure"). Keeping the
+move_group calls same-rmw (NUC-local) avoids that.
 
 Self-contained (no PolyUMI package deps) so it runs from a plain clone on the NUC:
     source /opt/ros/humble/setup.bash

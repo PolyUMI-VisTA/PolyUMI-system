@@ -2,9 +2,9 @@
 <!--
   Laptop-side inference demo: stream demo + policy_client_node.
 
-  Phase 0 runs everything on the laptop, including the (dummy) inference server
-  at localhost:8000. The FR3 fr3_* TF arrives over DDS from the NUC; source
-  setup_franka_env.sh first. See docs/franka-inference-bringup.md.
+  Everything on the laptop, including a (dummy) inference server at localhost:8000.
+  The FR3 fr3_* TF arrives over DDS from the NUC; source setup_franka_env.sh first.
+  See docs/crb-fr3-inference.md.
 
     ros2 launch polyumi_ros2 inference_demo.launch.xml
     ros2 launch polyumi_ros2 inference_demo.launch.xml pi_host:=10.106.3.110
@@ -89,9 +89,11 @@
          only way to steer them per run without editing inference.yaml. Which policy is being
          served decides both, and the answer changes between one rollout and the next.
 
-         Defaults mirror inference.yaml, so omitting them changes nothing. send_tactile must match
-         the server's SERVE_TACTILE, and n_audio_rows must match the checkpoint's
-         audio_obs_horizon — neither is detectable at runtime, so both are logged at startup. -->
+         Only send_tactile matches inference.yaml's value; n_audio_rows (17 here, 10 there) and
+         finger_output_size (224 here, -1 there) deliberately do not, so THESE defaults are what
+         a plain launch applies. send_tactile must match the server's SERVE_TACTILE, and
+         n_audio_rows the checkpoint's audio_obs_horizon — neither is detectable at runtime, so
+         both are logged at startup. -->
     <param name="send_tactile" value="$(var send_tactile)"/>
     <param name="n_audio_rows" value="$(var n_audio_rows)"/>
     <param name="finger_output_size.width" value="$(var finger_output_width)"/>

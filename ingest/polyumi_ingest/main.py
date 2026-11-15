@@ -1,5 +1,5 @@
 """
-ingest/main.py - PolyUMI ingest scripts to deal with pi's file & build pzarr stores.
+The `pingest` CLI: fetch sessions off the Pi, preprocess them, and build pzarr stores.
 
 See docs/data-format.md for an overview of the pzarr format.
 """

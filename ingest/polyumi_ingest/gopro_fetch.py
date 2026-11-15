@@ -1,5 +1,5 @@
 """
-ingest/gopro_fetch.py - Find GoPro MP4 files on SD card matching a session timestamp.
+Find GoPro MP4 files on an SD card matching a session timestamp.
 
 GoPro cameras embed a UTC creation_time tag in the MP4 container that records the exact
 moment the shutter was pressed. We prefer this over filesystem mtime, which is stored in
@@ -91,14 +91,9 @@ def _gopro_video_dirs(mount_point: pathlib.Path) -> list[pathlib.Path]:
     """
     Every ``DCIM/*GOPRO`` folder on the card, sorted.
 
-    The camera does not keep writing into ``100GOPRO`` forever: once a folder fills up (file
-    count or size limit) it rolls over to ``101GOPRO``, then ``102GOPRO``, and so on. A fetch
-    that only ever looks in ``100GOPRO`` finds every clip up to the first rollover and then,
-    silently, none of the clips after it -- every later session fails to match at all, with a
-    delta of however long ago ``100GOPRO`` stopped being written to, and re-running changes
-    nothing because the file it should have matched was never in the scanned directory. Glob
-    for every ``*GOPRO`` folder instead of hardcoding the first one so a rollover is invisible
-    to the caller.
+    The camera rolls over to ``101GOPRO``, ``102GOPRO`` and so on as folders fill, so scanning
+    only the first silently misses every clip after the first rollover -- and re-running cannot
+    recover it, because the file was never in the directory that was searched.
     """
     dcim = mount_point / 'DCIM'
     if not dcim.is_dir():
@@ -213,8 +208,6 @@ def find_gopro_video(
             )
         log.info(f'Auto-detected GoPro SD card at {mount_point}')
 
-    # Every DCIM/<N>GOPRO folder, not just the first: the camera rolls over to a new one once
-    # the current folder fills up, so a card mid-collection routinely has more than one.
     video_dirs = _gopro_video_dirs(mount_point)
     if not video_dirs:
         raise FileNotFoundError(f'No DCIM/<N>GOPRO folder found under {mount_point}')

@@ -1,34 +1,24 @@
 """
 The contact-mic preprocessing contract, inference side.
 
-This MUST stay in lock-step with what ``pingest export --type polyumi`` writes as ``data/mic_0``:
-the policy only compares like with like, so the waveform baked into training and the waveform this
-node feeds the policy have to be the same numbers. As with
-:mod:`polyumi_ros2.camera_preproc`, the ingest and ROS packages cannot share a Python import, so
-the contract is mirrored here on purpose. See ``docs/data-format.md`` and the Vista fork's
-``docs/SENSOR_PROCESSING.md``.
+This MUST stay in lock-step with what ``pingest export --type polyumi`` writes as ``data/mic_0``.
+The ingest and ROS packages cannot share a Python import, so the contract is mirrored here on
+purpose, as :mod:`polyumi_ros2.camera_preproc` is. See ``docs/data-format.md``.
 
-Three properties define a ``mic_0`` row, and all three are easy to get subtly wrong:
+A ``mic_0`` row is three things, all easy to get subtly wrong:
 
 * **Source** — the *piezo* contact mic, which the Pi records as channel 0 of a stereo stream.
   Channel 1 is the air mic and is not what any policy was trained on.
-* **Scale** — float32 in ``[-1, 1)``. ``pzarr`` builds it from the WAV as
-  ``int16 / 32768``, so the same divisor is applied here rather than shipping raw counts.
-* **Causality** — a row is the audio *ending at* the observation instant. Never any sample from
-  after it: at inference that audio does not exist yet, and a policy trained on look-ahead cannot
-  be served. ``config/contact_audio.yaml`` records this as ``block_alignment: causal`` and the
-  exported buffer carries it in ``meta.attrs['mic_0_block_alignment']``.
+* **Scale** — float32 in ``[-1, 1)``, from ``int16 / 32768`` as ``pzarr`` builds it.
+* **Causality** — the audio *ending at* the observation instant, never a sample after it, which at
+  inference does not exist yet. ``config/contact_audio.yaml`` calls this
+  ``block_alignment: causal``.
 
-**On the row width.** The exporter builds a row from ``stride`` per-frame blocks of
-``samples_per_gopro_frame`` samples each (2 x 268 = 536 at the shipped settings), anchored by
-``searchsorted`` on each GoPro frame's own timestamp. Those two blocks abut: at 59.94 fps they are
-~267 samples apart and 268 wide, so together they span the ~33.5 ms ending at the frame the step
-was taken from. This module therefore takes a row as one contiguous span of
-:data:`MIC0_SAMPLES_PER_ROW` samples ending at the observation instant, which reproduces the
-exporter to within the ~1-sample seam its deliberate block overlap creates. Doing it this way
-makes the contract independent of the *camera* rate, which differs between recording (a 59.94 fps
-GoPro) and inference (the Elgato capture) — anchoring to frame indices here would silently encode
-the wrong span.
+**Row width.** The exporter builds a row from two 268-sample per-frame blocks anchored on GoPro
+frame timestamps; they abut, so a row spans the ~33.5 ms ending at that frame. This module takes
+one contiguous span of :data:`MIC0_SAMPLES_PER_ROW` instead, which matches to within the ~1-sample
+seam that overlap creates and keeps the contract independent of the camera rate -- 59.94 fps when
+recording, the Elgato at inference.
 """
 
 import numpy as np

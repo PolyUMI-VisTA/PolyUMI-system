@@ -177,6 +177,10 @@
     # is the Vista fork's current shared contract (10 x 536 samples = ~0.33 s; see its
     # docs/SENSOR_PROCESSING.md). A checkpoint trained before that alignment wants 17. The node
     # logs the resolved value at startup for exactly this reason.
+    #
+    # NOTE inference_demo.launch.xml passes this as a launch arg AFTER loading this file, so its
+    # own default wins over the value here. Set it there, or pass n_audio_rows:= on the command
+    # line; editing it here alone has no effect through that launch file.
     n_audio_rows: 10
 
     # The finger_rgb crop. THIS IS THE CONTRACT: a policy trained on one crop cannot be served
@@ -222,7 +226,9 @@
       # frame). Must be >= the largest latency above that gets compensated for.
       ee_pose_s: 1.0
 
-      # Seconds of piezo audio retained. Must exceed n_audio_rows * 33.5 ms plus the largest
-      # latency compensated for, or the mic_0 window runs off the start of the ring and is
-      # silently zero-padded. 2.0 is ~6x the 10-row window.
+      # Seconds of piezo audio retained. The window itself always fits -- policy_client_node
+      # floors the ring at n_audio_rows * 536 samples -- so what this buys is headroom for the
+      # latency compensation, which reaches back further than the window. Too small and the
+      # window runs off the start of the ring and is silently zero-padded. 2.0 is ~6x the
+      # 10-row window.
       piezo_s: 2.0

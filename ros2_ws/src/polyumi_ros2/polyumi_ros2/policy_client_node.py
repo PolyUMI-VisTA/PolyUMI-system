@@ -4,7 +4,13 @@ ROS2 node that drives the Franka arm using a remote diffusion policy inference s
 At each control tick the node:
   1. Reads the latest wrist camera image and a latency-compensated end-effector pose (looked
      up in TF at the frame's own stamp - latency.gopro, to align with when that image was
-     actually captured).
+     actually captured). With ``send_tactile`` on it also takes the finger camera frame and a
+     window of contact-mic audio, cropped and scaled to the same contract the exporter wrote
+     (see ``audio_preproc`` / ``camera_preproc``).
+  1b. Anchors all of that on ``_observation_instant`` — the oldest of the enabled streams'
+     newest samples — so every channel describes the same moment. The finger camera's transport
+     runs ~150 ms behind the GoPro's, so pairing each stream's newest frame instead would skew
+     the tactile channels against the wrist image.
   2. Maintains a short history window (n_obs_steps), appended every tick so the window stays
      dt-spaced regardless of how often inference runs.
   3. Once per ``steps_per_inference`` ticks (a receding-horizon stride — NOT every tick), POSTs
@@ -16,10 +22,10 @@ At each control tick the node:
   5. Logs the chunk. If execute_motion is set, publishes the remaining chunk on two topics for
      the NUC-side bridges: the pose half as a MultiDOFJointTrajectory on
      /polyumi/target_poses_traj (spliced by the streaming Cartesian impedance controller), and the
-     gripper half as a JointTrajectory on /polyumi/target_gripper (franka_hand_node). The two
-     ride separate channels because the pose message carries no width and because the Franka Hand
-     is action-only, so it needs a different execution cadence entirely — see
-     docs/crb-fr3-inference.md ("Gripper problems").
+     gripper half as a JointTrajectory on /polyumi/target_gripper (the FAULHABER driver by
+     default; franka_hand_node if `gripper:=hand`). The two ride separate channels because the
+     pose message carries no width, and because whichever gripper is attached runs at its own
+     cadence — see docs/crb-fr3-inference.md ("Gripper problems").
 
 Usage:
     ros2 run polyumi_ros2 policy_client_node
@@ -241,42 +247,31 @@ class PolicyClientNode(Node):
 
         # --- Tactile channels (finger camera + contact mic) ---
         #
-        # Off by default, so a visuomotor policy (POLICY=dp) is served exactly as before: it
-        # requires neither channel, and sending them would only cost bandwidth. Turn on for the
-        # Vista family, every member of which indexes obs['finger_rgb'] and obs['mic_0']
-        # unconditionally — see the fork's docs/SENSOR_PROCESSING.md.
+        # These are fallbacks; config/inference.yaml carries the reasoning for each -- why
+        # n_audio_rows must match the checkpoint, where finger_crop's x_min comes from, and what a
+        # wrong finger_output_size does. Note inference_demo.launch.xml overrides n_audio_rows and
+        # finger_output_size after loading that yaml, so for those two the launch file is what
+        # actually applies.
+        #
+        # Off by default, so a dp checkpoint is served exactly as before. The Vista family indexes
+        # obs['finger_rgb'] and obs['mic_0'] unconditionally.
         self.declare_parameter('send_tactile', False)
         self.declare_parameter('finger_image_topic', '/pi/camera/image/compressed')
         self.declare_parameter('audio_topic', '/pi/audio/raw')
-        # Rows of `mic_0` per request — the policy's `audio_obs_horizon`. THIS MUST MATCH THE
-        # CHECKPOINT: 10 on the Vista fork's current contract (~0.33 s), but 17 for a checkpoint
-        # trained before that alignment. A mismatch is not an error anywhere; the policy simply
-        # receives a window it was never trained on, so the value is logged at startup.
         self.declare_parameter('n_audio_rows', 10)
-        # The `finger_rgb` crop, which IS the contract — a policy trained on one crop cannot be
-        # served frames from another. Defaults mirror ingest/config/finger_camera.yaml, where the
-        # provenance of x_min=170 (the mount's occlusion, measured) is written down. Negative
-        # means "the frame's own edge", standing in for that file's `null`.
         self.declare_parameter('finger_crop.x_min', 170)
         self.declare_parameter('finger_crop.x_max', -1)
         self.declare_parameter('finger_crop.y_min', 0)
         self.declare_parameter('finger_crop.y_max', -1)
-        # Resize applied AFTER the crop, mirroring the exporter's output_size. -1/-1 means none,
-        # which is the native crop and the shipped default. This must match the size the
-        # checkpoint's dataset was exported at: training and inference share crop_finger_rgb
-        # precisely so the frame the policy sees is byte-identical to the one it learned from, and
-        # a mismatch here reaches the model as a silently wrong input shape.
         self.declare_parameter('finger_output_size.width', -1)
         self.declare_parameter('finger_output_size.height', -1)
-        # Largest age of the finger frame chosen for a step. The export's counterpart trims steps
-        # past this rather than freezing an image, and 0.15 s is its shipped value (1.5 periods of
-        # the 10 fps camera). Note the export picks the NEAREST frame, which may be up to half a
-        # period in the future; inference can only ever look backwards, so the same bound admits
-        # a slightly older frame here than it did there. Unfixable — the future does not exist at
-        # inference — and recorded so a rollout's staleness is judged against the right baseline.
+        # The export's counterpart trims steps past this rather than freezing an image. It picks
+        # the NEAREST frame, up to half a period ahead; inference can only look backwards, so the
+        # same bound admits a slightly older frame here than it did there.
         self.declare_parameter('max_finger_age_s', 0.15)
-        # Seconds of piezo audio retained. Must exceed n_audio_rows * 33.5 ms plus the largest
-        # latency compensated for, or the window would run off the start of the buffer.
+        # Seconds of piezo audio retained. The window itself is guaranteed to fit -- capacity is
+        # floored at n_audio_rows * MIC0_SAMPLES_PER_ROW below -- so what this has to buy is the
+        # headroom for latency compensation, which reaches back further than the window alone.
         self.declare_parameter('buffers.piezo_s', 2.0)
 
         self._url = self.get_parameter('inference_server_url').get_parameter_value().string_value
@@ -349,12 +344,10 @@ class PolicyClientNode(Node):
         # One-shot: the crop assumes the incoming frame is pillarboxed, and only a real frame can
         # confirm it. See _check_pillarbox_once.
         self._pillarbox_checked = False
-        # Gripper aperture history, (stamp, width_m) oldest-first, for the same reason TF keeps a
-        # buffer: the width must be sampled at the *frame's* capture instant, not at tick time.
-        # tf2 does that interpolation for the pose; there's no equivalent for a plain topic, so we
-        # keep a short ring and interpolate by hand (see _gripper_width_at). Sized to cover
-        # ee_pose_s at the observed ~17 Hz with headroom, floored so a tiny buffer config can't
-        # leave us with a single sample and no interval to interpolate over.
+        # Gripper aperture history, (stamp, width_m) oldest-first: the width must be sampled at
+        # the frame's capture instant, and a plain topic has no tf2-style interpolating buffer, so
+        # we keep a ring and interpolate by hand (see _gripper_width_at). Sized to cover ee_pose_s
+        # at the observed ~17 Hz, floored so a tiny config cannot leave a single sample.
         self._gripper_buffer: deque = deque(maxlen=max(8, int(self._ee_pose_buffer_s * 40)))
 
         # --- Tactile state (only populated when send_tactile is on) ---
@@ -372,10 +365,9 @@ class PolicyClientNode(Node):
         self._latest_finger: np.ndarray | None = None
         self._latest_finger_stamp: rclpy.time.Time | None = None
         self._latest_finger_lock = threading.Lock()
-        # (stamp, frame) history, newest last. Only the newest frame is needed while the wrist
-        # camera sets the observation instant; once the slowest stream sets it instead, the frame
-        # wanted is the one captured THEN, which is several frames back. Sized from the buffer
-        # window rather than a frame count so it holds the same span at any capture rate.
+        # (stamp, frame) history, newest last. The frame wanted is the one captured at the shared
+        # observation instant, which is several frames back when a slower stream sets it. Sized
+        # from the buffer window, not a frame count, so it spans the same time at any rate.
         self._finger_history: deque = deque(maxlen=max(4, int(self._ee_pose_buffer_s * 30)))
         # Piezo audio as one flat ring: a deque of blocks would need re-concatenating on every
         # tick, and the window is a plain slice of a contiguous buffer. `_piezo_end_ns` is the
@@ -410,9 +402,11 @@ class PolicyClientNode(Node):
         # impedance controller (its 1 kHz interpolator splices consecutive chunks on the
         # per-waypoint absolute times the message carries). See target_chunk.py.
         # The gripper rides a SEPARATE topic, not a field on the pose chunk: the trajectory
-        # message carries no width, and the Franka Hand is action-only (no ros2_control interface,
-        # libfranka offers only blocking move/grasp), so it cannot be driven at the arm's cadence
-        # anyway. franka_hand_node on the NUC holds it as a horizon and plans Moves against it.
+        # message carries no width, and the gripper is a different device on its own cadence. The
+        # driver on the other end is selectable (fr3_inference.launch.py `gripper:=`): the
+        # FAULHABER CANopen driver by default, which already speaks this contract at 200 Hz, or
+        # franka_hand_node, which is action-only (libfranka offers only blocking move/grasp) and
+        # so holds the stream as a horizon and plans Moves against it.
         self._target_pub = None
         self._gripper_pub = None
         if self._execute_motion:
@@ -448,20 +442,14 @@ class PolicyClientNode(Node):
         # notice if the number was already being plotted.
         self._diag_pubs = {name: self.create_publisher(Float32, f'/polyumi/diag/{name}', 10) for name in DIAG_METRICS}
 
-        # Subscribers.
+        # The gripper gets its own callback group: sharing one with the image subscription starved
+        # it to 14.6 Hz against a 17.9 Hz topic, and _gripper_width_at then held a stale endpoint,
+        # feeding the policy an old agent_pos[7].
         #
-        # The gripper gets its OWN callback group. Left on the node's default group it shares one
-        # MutuallyExclusiveCallbackGroup with the image subscription, and 60 Hz of 6 MB rgb8
-        # deserialization starves it: measured on hardware, gripper callbacks gapped up to 1.4 s
-        # and ~20% of samples were dropped outright (14.6 Hz delivered against a 17.9 Hz topic).
-        # That is not merely a bad diagnostic — _gripper_width_at holds the nearest endpoint
-        # outside its buffer span, so the policy was being handed a silently stale agent_pos[7],
-        # and max_gripper_age_s tripped on most ticks. With its own group the callback tracks the
-        # topic exactly (worst gap 122 ms against the topic's own 124 ms worst interval).
-        #
-        # Depth 1 on the image, not 10: only the newest frame is ever used (_image_cb overwrites
-        # _latest_image), so a deeper queue just means working through stale frames after any
-        # hiccup — burning CPU to make image_age_s worse.
+        # Depth 1 on the image: _control_tick uses the frame at or before _observation_instant,
+        # not the newest, matching how the training export samples. A deeper queue would only mean
+        # draining stale frames after a hiccup, though depth 1 does bound how dense
+        # _image_history can be.
         self.create_subscription(Image, image_topic, self._image_cb, 1)
         self.create_subscription(
             JointState,
@@ -541,10 +529,8 @@ class PolicyClientNode(Node):
             f'max_image_age: {self._max_image_age_s * 1e3:.0f}ms, tf lookup: {tf_mode})'
         )
         if self._send_tactile:
-            # n_audio_rows is stated loudly because nothing downstream can catch it being wrong:
-            # a window of the wrong length is a valid frame the policy was simply never trained
-            # on. 10 is the Vista fork's current contract; a checkpoint from before that
-            # alignment wants 17.
+            # n_audio_rows is logged loudly because a wrong length is a valid frame nothing
+            # downstream can reject — see the parameter's own note.
             self.get_logger().info(
                 f'tactile channels ON — finger_rgb crop {self._finger_crop} '
                 f'(max age {self._max_finger_age_s * 1e3:.0f}ms), '
@@ -693,10 +679,7 @@ class PolicyClientNode(Node):
         if decoded is None:
             self._warn_throttled(f'Could not decode finger frame (format={msg.format!r})')
             return
-        # Crop, do not resize: the exporter stores `finger_rgb` at the crop's native size and the
-        # policy's dataset does the square-crop-and-resize when it loads. Sending the crop keeps
-        # this node reproducing what the EXPORTER stored, exactly as it does for camera0_rgb, and
-        # leaves the encoder's input size where the fork decides it.
+        # Crop only, at the crop's native size: the policy's dataset resizes when it loads.
         frame = crop_finger_rgb(decoded[:, :, ::-1], output_size=self._finger_output_size, **self._finger_crop)
         with self._latest_finger_lock:
             self._latest_finger = frame
@@ -721,10 +704,9 @@ class PolicyClientNode(Node):
         start_ns = rclpy.time.Time.from_msg(msg.timestamp).nanoseconds
         with self._piezo_lock:
             if self._piezo_end_ns is not None:
-                # Bridge or trim to what the stamp says, rather than assuming the stream is
-                # gapless: the Pi's own bridge warns about dropped chunks, and silently butting
-                # blocks together would slide the whole history against the wall clock, which no
-                # shape check can see. A gap becomes silence of the right duration.
+                # Bridge or trim to what the stamp says rather than assuming the stream is
+                # gapless: butting dropped blocks together would slide the whole history against
+                # the wall clock, which no shape check can see. A gap becomes silence instead.
                 gap = int(round((start_ns - self._piezo_end_ns) * MIC0_SAMPLE_RATE_HZ / 1e9))
                 if gap > 0:
                     self._warn_throttled(f'Contact-mic gap of {gap} sample(s); filling with silence.')
@@ -814,16 +796,15 @@ class PolicyClientNode(Node):
 
         The same time-alignment discipline the TF lookup gets, done by hand because a plain topic
         has no tf2-style interpolating buffer. Outside the cached span we hold the nearest endpoint
-        rather than extrapolating: the hand moves slowly relative to its own sample interval (see
-        franka_hand_node.cpp for the current figure -- it has drifted before and will again), so a
-        held value is a far smaller error than a linear extrapolation off the end would be.
+        rather than extrapolating: either gripper moves slowly relative to its own publish
+        interval, so a held value is a far smaller error than a linear extrapolation off the end.
+        The margin is much wider on the FAULHABER (200 Hz) than on the Franka Hand, so this is
+        sized for the slower of the two.
 
-        Interpolating, not holding, inside the span is also why latency.gripper is a pure
-        propagation-lag term and not a sampling-interval correction: two straddling samples already
-        bound the true value regardless of how far apart they are, so nothing here needs shifting
-        to account for the gap between them -- only for the hand's samples arriving late relative to
-        the aperture they claim to report, which is unmeasured (see latency.gripper in
-        inference.yaml).
+        Interpolating inside the span is why latency.gripper is a pure propagation-lag term and
+        not a sampling-interval correction: two straddling samples bound the true value however far
+        apart they are. Only the samples arriving late relative to the aperture they report needs
+        correcting, and that is unmeasured (see latency.gripper in inference.yaml).
 
         :param target: instant to sample the aperture at, or None for "latest available".
             Note this is deliberately **not** tf2's convention, where a zero ``Time()`` means
@@ -919,20 +900,18 @@ class PolicyClientNode(Node):
             return  # warning already logged inside
 
         # --- 3. Append to history buffer ---
-        # The finger frame is sampled at the shared observation instant, not the tick's: the two
-        # cameras share the observation timeline the sampler built at training ("same instants as
-        # wrist"). None when tactile is off, or when no frame is fresh enough — checked below,
-        # once the window is full, so a startup gap reads as "filling" rather than as a fault.
+        # The finger frame is sampled at the shared observation instant, not the tick's, matching
+        # the timeline the sampler built at training. None when tactile is off or no frame is
+        # fresh enough; checked below once the window is full, so a startup gap reads as filling.
         finger = None
         if self._send_tactile:
             with self._latest_finger_lock:
                 found = self._frame_at(self._finger_history, t_obs, self._latency['finger_cam'])
             if found is not None:
                 finger_stamp, candidate = found
-                # Aged against now, exactly as the wrist frame is, because this guard exists to
-                # catch a stalled stream. Measuring against t_obs instead would compare the finger
-                # camera to an instant it usually sets itself -- it is the slowest stream, so that
-                # gap is near zero however long the camera has been dead.
+                # Aged against now, as the wrist frame is, because this guard catches a stalled
+                # stream. Against t_obs it would compare the finger camera to an instant it
+                # usually sets itself, so the gap stays near zero however long it has been dead.
                 age = (self.get_clock().now() - finger_stamp).nanoseconds / 1e9
                 self._diag('finger_age_s', age)
                 if age > self._max_finger_age_s:
@@ -970,10 +949,9 @@ class PolicyClientNode(Node):
             'agent_pos': np.stack([entry[1] for entry in self._obs_buffer]),
         }
         if self._send_tactile:
-            # Both tactile channels are all-or-nothing for a request: the Vista family indexes
-            # them unconditionally, and the wire format deliberately refuses a partial frame
-            # rather than letting a modality reach the model as absent. Skipping the tick is the
-            # honest failure — the next one may have the data.
+            # Both tactile channels are all-or-nothing: the Vista family indexes them
+            # unconditionally, and the wire format refuses a partial frame rather than letting a
+            # modality reach the model as absent. Skip the tick; the next may have the data.
             fingers = [entry[2] for entry in self._obs_buffer]
             mic = self._mic0_channel(t_obs + Duration(seconds=self._latency['piezo_mic']))
             if any(frame is None for frame in fingers) or mic is None:
@@ -1137,23 +1115,16 @@ class PolicyClientNode(Node):
         """
         Count the leading actions in a chunk that are already in the past by execution time.
 
-        Action i in a chunk is the policy's target for t_obs + i * action_dt, where t_obs is
-        the instant the observation was captured. Everything between that instant and the device
-        actually moving makes the leading actions stale: the frame's transit through the
-        capture pipeline, the tick's own serialization work, the server's round trip, and
-        ``latency_act`` before the device starts moving. Actions whose target instant falls inside
-        that window have already elapsed — executing them would drag the device backwards through
-        the trajectory — so skip to the first one still in the future.
+        Action i targets ``t_obs + i * action_dt``, so any action whose instant falls before the
+        device can move has already elapsed, and executing it drags the device backwards through
+        the trajectory. Called after the server responds, so ``now() - t_obs`` measures the
+        capture pipeline, the tick and the round trip directly rather than summing assumed
+        constants; only ``latency_act`` is still ahead and has to be added.
 
-        Called after the server responds, so ``now() - t_obs`` measures every delay up to this
-        point directly (capture pipeline + tick + inference round trip) instead of summing
-        assumed constants for them; only ``latency_act`` is still in the future and must be added.
-
-        Clamped at 0: if t_obs somehow lands in the future (clock skew between the camera
-        driver's stamps and this node), a negative count would slice from the *end* of the
-        chunk — `actions[-3:]` keeps the last three, jumping the device ahead to the far-future
-        tail of the trajectory instead of dropping anything. No upper clamp is needed: a count
-        at or past the chunk length yields an empty slice, which the caller already reports.
+        Clamped at 0 because a negative count slices from the *end* of the chunk --
+        ``actions[-3:]`` would jump the device to the far-future tail instead of dropping
+        anything. No upper clamp: a count past the chunk length yields an empty slice, which the
+        caller already reports.
 
         :param t_obs: instant the observation was captured (image stamp - latency.gopro).
         :param latency_act: this device's publish-to-motion delay, in seconds. Passed rather than
@@ -1426,9 +1397,9 @@ class PolicyClientNode(Node):
         """
         Build the gripper half of an action chunk as an absolutely-timed single-DOF trajectory.
 
-        ``header.stamp + time_from_start`` is a real schedule, exactly as for the arm chunk:
-        franka_hand_node holds these as a horizon and plans which of them a Move can still reach,
-        which only works if they name instants. The anchor is ``t_obs - latency.gripper_exec``, so
+        ``header.stamp + time_from_start`` is a real schedule, exactly as for the arm chunk --
+        franka_hand_node, if that is the driver, holds these as a horizon and plans which of them a
+        Move can still reach, which only works if they name instants. The anchor is ``t_obs - latency.gripper_exec``, so
         every waypoint is commanded that far ahead of when it should be reached, and the index is
         the PRE-slice one — numbering the survivors of the stale-drop from zero would slide the
         whole timeline earlier by exactly the amount the drop was meant to remove.

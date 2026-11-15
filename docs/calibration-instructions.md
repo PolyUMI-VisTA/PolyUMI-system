@@ -390,8 +390,10 @@ measurement taken against the wrong one is not merely stale, it is meaningless.
   the wrist camera's alone -- see `_observation_instant`. It is not a config constant: pairing the
   newest frame from each stream would skew the tactile channels ~150 ms against the wrist image no
   matter what `latency.finger_cam` is set to.
-- **`latency.piezo_mic` is still unmeasured.** It needs an acoustic equivalent of the QR rig: a
-  known-time impulse the mic can hear, cross-correlated against its onset in `/pi/audio/raw`.
+- **`latency.piezo_mic` is 0.0 for the same reason**: `polyumi_pi/clock.py` subtracts the capture
+  buffer's occupancy, so the stamp is the first sample's capture instant. A rig would still check
+  the analog path ahead of the ADC — a known-time impulse cross-correlated against `/pi/audio/raw`
+  — which is expected to be small and has not been confirmed.
 - **Don't run any probe mode while `policy_client_node` is up.** The arm and gripper modes publish to
   the same topics the policy does, and the bridges act on whichever chunk arrived last.
 - **Monitor scanout is inside `latency.gopro`.** The probe subtracts its own render time but cannot

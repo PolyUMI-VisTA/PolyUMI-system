@@ -1,11 +1,13 @@
 # Adding contact-mic audio to the policy (the ManiWAV recipe)
 
-This is a **handoff document**, not a description of code that exists. PolyUMI's ingest side now
-exports the finger contact mic **and the finger camera**; nothing yet consumes either. What follows
-is the data contract you can build against, why the spectrogram is deliberately *not* precomputed
-for you, and — as an appendix — a checklist of what to port from
+This is the **data contract** for the finger contact mic and the finger camera: what
+`export --type polyumi` writes, why the spectrogram is deliberately *not* precomputed for you,
+and — as an appendix — a checklist of what to port from
 [ManiWAV](https://github.com/real-stanford/maniwav) if you want to follow their recipe rather than
 invent your own. §1.5 covers the finger camera, which has no ManiWAV counterpart and is ours alone.
+
+Both modalities are now consumed end to end — training in `external/polyumi_diffusion_policy`
+(§5), inference in its `serve_policy.py` and in `polyumi_ros2` (§6).
 
 ```
 pingest fetch → process-all → pp (steps 1–6) → export --type polyumi → TRAIN (your container)
@@ -66,7 +68,7 @@ match them exactly — it is a re-export, not a re-preprocess. Either way the ch
 `meta.attrs` records which convention it trained under, and a server must reproduce it.
 
 **Only the contact mic is exported.** ManiWAV carries `mic_0` (contact) and `mic_1` (air); their
-task config uses only `mic_0` anyway. I can add mic_1 if you wish, however.
+task config uses only `mic_0` anyway. `mic 0` can be added later if you want to use air mic data. 
 
 ---
 
@@ -231,45 +233,42 @@ the size ManiWAV's was, over the same 2 s of wall time. Note their horizon of 12
 
 ## 5. Selecting your policy at train time
 
-`train_policy.sh` forwards a `DP_CONFIG` environment variable into the container:
+`train_policy.sh` forwards a `CONFIG_NAME` environment variable into the container, and both
+forks' `docker/train.sh` read it into `--config-name`:
 
 ```bash
-DP_CONFIG=train_diffusion_unet_timm_polyumi_audio_workspace \
+CONFIG_NAME=train_diffusion_unet_timm_polyumi_audio_workspace \
 DATASET=/abs/path/to/audio.zarr.zip ./train_policy.sh
 ```
 
-For this to do anything, the fork's `docker/train.sh` must read it:
-
-```bash
---config-name="${DP_CONFIG:-train_diffusion_unet_timm_polyumi_workspace}"
-```
-
-Unset, it keeps today's visuomotor default, so the hook is inert until you wire that half. It is
-an env var rather than a Hydra override because Hydra cannot override `--config-name` through a
-passthrough override.
+Unset, it falls back to the fork's own default from `config/policy.<name>.env`. It is an env var
+rather than a Hydra override because Hydra cannot set `--config-name` that way. Everything *else*
+you pass to `train_policy.sh` does reach Hydra as an override, so `task=polyumi_slip_vta` picks a
+task config without naming a workspace file at all.
 
 ---
 
-## 6. Inference is not wired yet
+## 6. Inference
 
-Do not wire `mic_0` or `finger_rgb` into `serve_policy.py` expecting it to run on the arm.
+Both channels are wired. `serve_obs.py` takes optional `finger_rgb` and `mic_0`, and
+`serve_policy.py` reads which of them a checkpoint needs from that checkpoint's own obs encoder —
+so a visuomotor checkpoint is unaffected, and a tactile one raises naming the channel the wire did
+not carry rather than being served a missing observation.
 
-`latency.piezo_mic` and `latency.finger_cam` in
-`ros2_ws/src/polyumi_ros2/config/inference.yaml` are 0 because they are unmeasured: measuring
-either needs a rig, and both depend on the Pi being chrony-synced to the ROS host (step 6 of
-[pi-provisioning.md](pi-provisioning.md)). Note that an observation is only as fresh as its
-slowest signal, so adding audio makes the capture instant the oldest across streams.
+**The per-stream conventions are reproduced at serve time**, from live streams rather than stored
+arrays, and each half is mirrored in the ROS package with a parity test against the exporter:
 
-What remains is that **the per-stream conventions have to be reproduced exactly at serve time**,
-from live streams rather than stored arrays — the block alignment for `mic_0` (§1), and the crop
-for `finger_rgb` (§1.5). The crop half is already done:
-`ros2_ws/.../polyumi_ros2/camera_preproc.py` carries the same `crop_finger_rgb` the exporter uses,
-with both test suites asserting the same digests, so wiring the finger camera is a subscription
-rather than a re-derivation.
+| convention | ROS side | parity test |
+|---|---|---|
+| `finger_rgb` crop (§1.5) | `polyumi_ros2/camera_preproc.py` | `ingest/test/test_finger_camera_export.py` |
+| `mic_0` scale + causal alignment (§1) | `polyumi_ros2/audio_preproc.py` | `ingest/test/test_mic0_inference_parity.py` |
 
-Worth doing now regardless: make the server raise at load time if a checkpoint expects a modality
-it cannot supply, so an audio- or finger-camera checkpoint fails loudly instead of being served with
-a missing observation.
+**On latency:** `latency.piezo_mic` and `latency.finger_cam` are `0.0` by measurement, not for
+want of measuring — the Pi stamps at capture. The transport *after* the stamp is the large term,
+and `policy_client_node` anchors every stream on the oldest capture instant to absorb it, so adding
+audio makes the observation only as fresh as its slowest signal. The numbers and the reasoning are
+in [calibration-instructions.md](calibration-instructions.md); both channels still need the Pi
+chrony-synced to the ROS host (step 6 of [pi-provisioning.md](pi-provisioning.md)).
 
 ---
 

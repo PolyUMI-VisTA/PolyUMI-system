@@ -93,6 +93,24 @@ cd inference_server && uv run dummy-server    # :8000
 
 `external/polyumi_diffusion_policy/docker/serve.sh` is the *in-container* entrypoint; you should not run this directly.
 
+**Four settings have to agree with the checkpoint**, and the ones that matter fail *silently* when
+they do not — the policy simply runs on a frame it was never trained on:
+
+| setting | where | applies to | a wrong value does |
+|---|---|---|---|
+| `POLICY` | `serve_policy.sh` env | both | fails loudly: the image cannot unpickle the checkpoint |
+| `SERVE_TACTILE` | `serve_policy.sh` env | **vista only** | server does not require the tactile channels |
+| `send_tactile` | launch arg | both | client does not send them |
+| `n_audio_rows` | launch arg | both | a valid `mic_0` window of the wrong length |
+
+`SERVE_TACTILE` is a Vista-fork variable; its `serve_policy.py` reads it to decide which channels
+are required. The **dp fork ignores it** and reads the channels off the checkpoint's own obs
+encoder instead, so a dp tactile checkpoint (`slip_vt`, `slip_vta`, `slip_ta`) needs no
+server-side flag — it refuses a request missing a channel it was trained on.
+
+`n_audio_rows` has no check anywhere: a window of the wrong length is a valid frame. The node logs
+the resolved value at startup, and that is the only signal.
+
 ## 4. Pi
 
 SSH into the raspberry pi and run:
