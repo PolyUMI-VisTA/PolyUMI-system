@@ -31,10 +31,15 @@ catalog/          # Catalog UI: Web UI for organizing datasets collected on the 
 docs/             # Documentation for this repo
 external/         # Git submodules
   franka_gripper_control/   # FAULHABER gripper driver (CANopen CSP); runs on the NUC, speaks our
-                            #   /polyumi/target_gripper contract unmodified
+                            #   /polyumi/target_gripper contract unmodified. Wiring, calibration
+                            #   and the CANopen details live in that repo's own docs
   franka_ros2/              # ROS2 control stack for Franka Emika Panda robot arm
+  franka_streaming_impedance_controller/
+                            # streaming Cartesian impedance controller for the FR3, driven by
+                            #   absolutely-timed pose chunks (see its own README)
   ORB_SLAM3_PolyUMI/        # PolyUMI's ORB_SLAM3 fork (monocular visual-inertial SLAM for the GoPro Hero 12)
   polyumi_diffusion_policy  # control policy implementations, dockerized & wrapped in an API server
+  polyumi_vista_policy/     # multimodal policy zoo (+ finger camera, + contact mic); POLICY=vista
 inference_server/ # polyumi_inference: the inference wire protocol and both ends of it
                   #   (the ROS client imports it; so does the policy server. See docs/crb-fr3-inference.md)
 infra/            # RPi provisioning infrastructure (see docs/pi-provisioning.md)
@@ -50,8 +55,12 @@ ros2_ws/
 
 **Additional scripts:**
 ```
+build_policy_image.sh # selects a policy fork and builds its image; sourced by train/serve so both
+                      #   roles run a byte-identical one
 deploy.sh           # deploys code updates to the pi
+deploy_lamb.sh      # deploys this working copy to the GPU system
 fr3_session.sh      # brings up tmux sessions for inference on the CRB's arm
+rerun_pp_task.sh    # re-runs the preprocessing pipeline with --force on every scene of one task
 serve_policy.sh     # brings up inference server for a trained model
 setup_franka_env.sh # sets up PC-side environment for interacting with the CRB's arm
 train_policy.sh     # starts model training
@@ -233,9 +242,29 @@ robot and lab. The protocol — the wire format, the client, and the server app 
 [docs/crb-fr3-inference.md](docs/crb-fr3-inference.md) is a worked example for one
 specific Franka FR3 setup that you can adapt.
 
+**Serving a checkpoint** means getting `POLICY`, `SERVE_TACTILE`, `send_tactile` and
+`n_audio_rows` to agree, and most of those fail *silently* when wrong — the policy just runs on a
+frame it was never trained on. There is no tooling for this; set them together, by hand.
+
+`ros2_ws/src/polyumi_ros2/scripts/record_eval_trial.sh` records one evaluation trial as a rosbag,
+into a per-policy folder.
+
+**Home Position** `nuc/fr3_home_service.py` serves `/polyumi/home` (move to the stored pose) and
+`/polyumi/set_home` (record wherever the arm is standing now, persisted across bringups). It runs
+on the NUC rather than the laptop because large nested MoveIt goals get corrupted across the
+Humble/Kilted boundary.
+
 ## Hardware Notes
 
 The Raspberry Pi app in `pi/` also depends upon a custom fork of [OpenGoPro](https://github.com/cwoodhayes/OpenGoPro) with some specific extra capabilities & one bugfix; without these the library cannot connect over BLE on Debian Trixie (and its downsteam RPi fork which we are using.)
+
+### Contact mic
+
+The finger piezo can stop converting partway through a capture and latch to a constant, while
+ALSA still reports `RUNNING` and `arecord` still exits 0 — so the recording looks like a plausible
+quiet signal. [docs/contact-mic-audio.md](docs/contact-mic-audio.md) is the investigation record:
+what was measured, what was ruled out, what is still open, and the `pi/alsa_preset` routing and
+gains that follow from it. Read it before changing the capture routing.
 
 ### PiSugar Battery
 
