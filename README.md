@@ -11,7 +11,8 @@ PolyUMI is a multimodal robot learning policy data collection, training, and inf
 - **vision** (via GoPro camera on wrist + finger camera peripheral vision)
 - **proprioception** (via GoPro SLAM)
 
-Due to the finger's onboard compute & the system's modular design, it is simple to integrate additional sensors, experiment with new models, and support other arms & grippers than the FR3 + Franka Hand we support out of the box.
+The entire system is open source, and can be built in less than a day given materials common to robotics labs (3d printer, laser cutter, and supplies ordered from Amazon + DigiKey). For labs who have built UMI before, **you can build PolyUMI for <$250 by reusing UMI materials**.
+Due to the system's modular design, it is simple to integrate additional sensors, experiment with new models, and use other arms & grippers than the FR3 + Franka Hand we support out of the box.
 
 ![PolyUMI system overview](docs/system_v2.jpg)
 > Sensing capabilities and hardware platform.
