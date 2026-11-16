@@ -1,17 +1,18 @@
-https://github.com/user-attachments/assets/2f902600-9682-4e67-a75c-fc8fa358cb92
-
 # PolyUMI: Visual + Auditory + Tactile Manipulation Platform for Imitation Learning
+
+<h3 style="text-align: center;">🤖 Winner of "Best Device" in the <a href="https://umi-arena.github.io/">UMI Arena Workshop</a> @ CoRL 2026 🤖</h3>
 
 **Project website:** https://polyumi-vista.github.io/<br>
 **Hardware build guide (incl. CAD files, BOM, etc):** [Google Doc](https://docs.google.com/document/d/1T0v_7H8YAJjOud9QWYlQct29a78YKvELPIpKTzajFs0/edit?usp=sharing)
 
-PolyUMI is an imitation learning platform supporting UMI-style data collection via a handheld gripper, which unifies the following sensor modalities in a single end-effector:
-- **touch** (via a custom optical tactile-sensing finger, based on [PolyTouch](https://polytouch.alanz.info/)) - *10fps 540x480 MJPEG video (MP4)*
-- **mechanical vibration** (via a contact microphone fixed to the finger housing) - *16kHz PCM audio (WAV)*
-- **vision** (via GoPro camera on wrist + finger camera peripheral vision) - *60fps 1920x1080 MJPEG video (MP4) + 10fps 540x480 MJPEG video*
-- **proprioception** (via monocular inertial SLAM from GoPro + IMU in gripper, or OptiTrack for the same, plus robot joint encoders + FK in embodiments)
+PolyUMI is a multimodal robot learning policy data collection, training, and inference platform, which enables **rapid iteration on imitation learning policies beyond visuomotor**. It unifies the following modalities in a single end-effector:
+- **touch** (via a custom optical tactile-sensing finger, based on [PolyTouch](https://polytouch.alanz.info/))
+- **mechanical vibration** (via a contact microphone on the finger)
+- **vision** (via GoPro camera on wrist + finger camera peripheral vision)
+- **proprioception** (via GoPro SLAM)
 
-It combines the [Universal Manipulation Interface (UMI)](https://umi-gripper.github.io/) platform with a custom touch-sensing finger inspired by the [PolyTouch tactile + audio sensor](https://polytouch.alanz.info/), with hardware, firmware, and software designed from scratch for modularity and hardware performance on a modern robotics stack (ROS2 Kilted/Humble, Python 3.13, Foxglove).
+The entire system is open source, and can be built in less than a day given materials common to robotics labs (3d printer, laser cutter, and supplies ordered from Amazon + DigiKey). For labs who have built UMI before, **you can build PolyUMI for <$250 by reusing UMI materials**.
+Due to the system's modular design, it is simple to integrate additional sensors, experiment with new models, and use other arms & grippers than the FR3 + Franka Hand we support out of the box.
 
 ![PolyUMI system overview](docs/system_v2.jpg)
 > Sensing capabilities and hardware platform.
