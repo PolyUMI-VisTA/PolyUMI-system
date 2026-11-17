@@ -2,8 +2,8 @@
 
 PolyUMI depends on some hardcoded constants to run inference. Where possible, scripts are included in the repo to produce correctly calibrated values for these.
 Some of these constants
-should generally be the same from setup to setup (ie the gripper width offset), 
-while others may be substantially different (sensor + arm execution latencies). 
+should generally be the same from setup to setup (ie the gripper width offset),
+while others may be substantially different (sensor + arm execution latencies).
 
 Here is a quick doc detailing the calibration procedures for the system & where to find the associated values:
 
@@ -71,7 +71,7 @@ For the training constant, measure the center of the GoPro model's lens plate ->
 camera sensor plane's position. The constant is expressed in gopro optical frame.
 For the inference constant, this is split into a few values to help clarify how it was calculated. The only confusing part is locating the fr3_hand coordinate in the cad; I used the center of the gripper finger track on the Franka Hand CAD model, which I then verified using the pivot test (see below).
 
-**Hardware verification (sanity checks):** 
+**Hardware verification (sanity checks):**
 
 For the training constants, you should be able to view the resulting frame in Foxglove for any sessions you recorded; check this visually.
 
@@ -117,7 +117,7 @@ ros2 topic echo /franka_robot_state_broadcaster/robot_state --field o_f_ext_hat_
 To iterate without relaunching, `SetLoad` can be called by hand — but **only while no controller holds the arm.** With one active the robot is in `Move` mode and rejects it outright, so deactivate first and reactivate after. Note also that `center_of_mass` on the wire is in **`fr3_link8`** while `PAYLOAD_COM_HAND` is in `fr3_hand` — `tcp_calib.payload_com_flange()` does that conversion, and `tcp_calib.set_load_request()` prints the whole request literal for you. Write the winning numbers into `nuc/tcp_calib.py` when you're done.
 
 What you really want to see, though, is that when you launch fr3_inference.launch.py,
-(which starts the impedance controller upon first launch after the bringup), 
+(which starts the impedance controller upon first launch after the bringup),
 that the fingertip doesn't move at all in any direction, by rotation or translation, at _any position of the arm_.
 
 You can kind of move the arm into different positions to back out if your CoM is at the wrong place once you have the
@@ -172,7 +172,7 @@ In addition to the strictly necessary offsets above, we also measure & track the
 
 #### Part 1 — the handheld side (closed width)
 
-1. **Record a calibration scene.** Open and close the gripper fully in front of the GoPro, several times, **holding it shut for a few seconds each cycle**. 
+1. **Record a calibration scene.** Open and close the gripper fully in front of the GoPro, several times, **holding it shut for a few seconds each cycle**.
 
 2. **Run preprocessing, then the calibration:**
    ```bash
@@ -205,7 +205,7 @@ past 0.023 m.
 
 #### Sanity check
 
-You should look at the gripper in CAD & make sure the distance between the ARUCO tags is about the same as the one you measured. 
+You should look at the gripper in CAD & make sure the distance between the ARUCO tags is about the same as the one you measured.
 
 Currently, the handheld gripper opens ~6 mm wider than the arm can, so the top ~7% of the policy's commanded range saturates at `gripper_max_width_m`. That is expected, shows up as the policy's intent clipping rather than as an error, and is inherent to the two mechanisms having different strokes. A gap of *centimetres*, or the arm appearing to open wider than the handheld, means one of the two measurements is wrong.
 
@@ -235,7 +235,7 @@ empirically on every tick by `_n_stale_actions`, which runs *after* the response
 | `latency.gripper` | printed by the gripper run; half the joint-state publish interval |
 | `latency.proprio` | adopted constant, ~0.001 — see below |
 | round trip | nothing to do; measured live |
-| `latency.finger_cam`, `latency.piezo_mic` | deferred, and blocked — see below |
+| `latency.finger_cam`, `latency.piezo_mic` | see below — the QR rig does not apply |
 
 Everything is measured by one node with three modes:
 
@@ -372,11 +372,28 @@ measurement taken against the wrong one is not merely stale, it is meaningless.
   it is ~1 ms; UMI hit the identical wall and hardcodes `robot_obs_latency: 0.0001`. The `arm_exec`
   measurement returns `arm_exec + proprio`, and at 1 ms that is well inside its own noise floor.
   Building a rig to split them is not worth it.
-- **`latency.finger_cam` and `latency.piezo_mic` are unmeasured.** Neither stream is subscribed by
-  the inference path yet, so neither value is consumed. Measuring either needs a rig: the span
-  from photon (or contact) to ROS header stamp is not observable from inside the node. **Both
-  depend on the Pi being chrony-synced to the ROS host** — see "Clock sync" in
-  [pi-provisioning.md](pi-provisioning.md).
+- **The QR rig cannot measure `latency.finger_cam`.** The finger camera is mounted looking at the
+  tactile sensing surface inside the gripper, so it cannot film a screen; `mode:=camera` needs the
+  camera pointed at the code. What is observable instead is the span from the Pi's header stamp to
+  arrival on the ROS host, and for this camera that span is most of the delay: the Pi stamps at
+  capture (`polyumi_pi/clock.py` even subtracts the audio buffer's occupancy), so JPEG encode, the
+  ZMQ hop, the link and the receive loop all land after the stamp. Only sensor readout escapes it.
+  Measure with `ros2 topic delay <topic>`, one topic at a time -- a probe that subscribes to
+  several at once measures its own backlog, since rclpy deserialises in Python and cannot keep up
+  with 60 Hz of 1080p.
+- **Measured 2026-09-08 over the USB gadget link**, Pi chrony-synced to lamb at +40 us:
+  `/pi/camera/image/compressed` **161 ms** (min 141, max 178, sd 10.7);
+  `/gopro/image_raw/compressed` **10 ms** (min 9, max 17, sd 0.45). So the finger camera's
+  transport runs ~150 ms behind the wrist camera's, which is more than one finger-camera frame
+  period at 10 fps. Re-measure on WiFi if inference ever runs over it; the numbers will differ.
+- **This is why `policy_client_node` takes the oldest capture instant across streams** rather than
+  the wrist camera's alone -- see `_observation_instant`. It is not a config constant: pairing the
+  newest frame from each stream would skew the tactile channels ~150 ms against the wrist image no
+  matter what `latency.finger_cam` is set to.
+- **`latency.piezo_mic` is 0.0 for the same reason**: `polyumi_pi/clock.py` subtracts the capture
+  buffer's occupancy, so the stamp is the first sample's capture instant. A rig would still check
+  the analog path ahead of the ADC — a known-time impulse cross-correlated against `/pi/audio/raw`
+  — which is expected to be small and has not been confirmed.
 - **Don't run any probe mode while `policy_client_node` is up.** The arm and gripper modes publish to
   the same topics the policy does, and the bridges act on whichever chunk arrived last.
 - **Monitor scanout is inside `latency.gopro`.** The probe subtracts its own render time but cannot

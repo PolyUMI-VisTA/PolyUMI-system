@@ -27,7 +27,8 @@ catalog/          # Catalog UI: Web UI for organizing datasets collected on the 
 docs/             # Documentation for this repo
 external/         # Git submodules
   franka_gripper_control/   # FAULHABER gripper driver (CANopen CSP); runs on the NUC, speaks our
-                            #   /polyumi/target_gripper contract unmodified
+                            #   /polyumi/target_gripper contract unmodified. Wiring, calibration
+                            #   and the CANopen details live in that repo's own docs
   franka_ros2/              # ROS2 control stack for Franka Emika Panda robot arm
   ORB_SLAM3_PolyUMI/        # PolyUMI's ORB_SLAM3 fork (monocular visual-inertial SLAM for the GoPro Hero 12)
   polyumi_diffusion_policy/ # control policy implementations, dockerized & wrapped in an API server
@@ -48,7 +49,10 @@ ros2_ws/
 
 **Additional important scripts:**
 ```
+build_policy_image.sh # selects a policy fork and builds its image; sourced by train/serve so both
+                      #   roles run a byte-identical one
 deploy.sh           # deploys code updates to the pi
+deploy_lamb.sh      # deploys this working copy to the GPU system
 fr3_session.sh      # brings up tmux sessions for inference on the CRB's arm
 serve_policy.sh     # brings up inference server for a trained model
 setup_franka_env.sh # sets up PC-side environment for interacting with the CRB's arm
@@ -230,6 +234,14 @@ robot and lab. The protocol — the wire format, the client, and the server app 
 
 [docs/crb-fr3-inference.md](docs/crb-fr3-inference.md) is a worked example for one
 specific Franka FR3 setup that you can adapt.
+
+`ros2_ws/src/polyumi_ros2/scripts/record_eval_trial.sh` records one evaluation trial as a rosbag,
+into a per-policy folder.
+
+**Home Position** `nuc/fr3_home_service.py` serves `/polyumi/home` (move to the stored pose) and
+`/polyumi/set_home` (record wherever the arm is standing now, persisted across bringups). It runs
+on the NUC rather than the laptop because large nested MoveIt goals get corrupted across the
+Humble/Kilted boundary.
 
 ## Hardware Notes
 

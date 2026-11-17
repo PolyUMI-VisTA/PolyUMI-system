@@ -1,5 +1,5 @@
 """
-Tests for the NUC-side MoveIt bridge's /polyumi/home service.
+Tests for the NUC-side MoveIt bridge's /polyumi/home and /polyumi/set_home services.
 
 Homing is the one path here that moves the arm on an explicit request rather than on a streamed
 chunk, and every way it can be wrong is silent: a wrong joint name plans to a pose that is not
@@ -20,8 +20,11 @@ from unittest.mock import MagicMock, patch
 from moveit_msgs.msg import MoveItErrorCodes, RobotTrajectory
 import pytest
 import rclpy
+from rclpy.duration import Duration
 from rclpy.parameter import Parameter
+from sensor_msgs.msg import JointState
 from std_srvs.srv import Trigger
+import yaml
 
 import fr3_home_service as mb
 
@@ -35,16 +38,21 @@ def ros():
 
 
 @pytest.fixture
-def make_node():
+def make_node(tmp_path):
     """
     Build a bridge whose move_group clients are mocks, so no server or executor is required.
 
     create_client is patched to hand back a fresh mock per call — the real one would make
     __init__ block for its two 10 s wait_for_service/wait_for_server timeouts.
+
+    `home_pose_file` defaults into tmp_path: the bridge loads a taught pose at construction, and
+    without this every test on a machine that has ever run /polyumi/set_home would silently home
+    to whatever is in the developer's ~/.ros instead of the SRDF pose it asserts against.
     """
     nodes = []
 
     def _make(**overrides):
+        overrides.setdefault('home_pose_file', str(tmp_path / 'home_pose.yaml'))
         params = [Parameter(k, value=v) for k, v in overrides.items()]
         with (
             patch.object(mb.Fr3HomeService, 'create_client', side_effect=lambda *a, **k: MagicMock()),
@@ -329,3 +337,280 @@ def test_home_without_the_servo_running_does_not_switch_back(make_node):
     assert _home(node).success, 'a declined handover must not fail the home itself'
 
     assert _switch_pairs(call_async) == [((mb.MOVEIT_CONTROLLER,), (mb.SERVO_CONTROLLER,))]
+
+
+# ----------------------------------------------------------------------
+# Teaching the start pose (/polyumi/set_home)
+# ----------------------------------------------------------------------
+
+TAUGHT = [0.11, -0.22, 0.33, -1.44, 0.55, 1.66, 0.77]
+
+
+def _joint_state(names, positions) -> JointState:
+    """Build a JointState carrying these joint names and positions."""
+    msg = JointState()
+    msg.name = list(names)
+    msg.position = [float(p) for p in positions]
+    return msg
+
+
+def _feed(node, positions=TAUGHT, names=None):
+    """Deliver a joint state to the bridge as the broadcaster would."""
+    node._on_joint_state(_joint_state(names if names is not None else mb.HOME_JOINT_NAMES, positions))
+
+
+def _set_home(node) -> Trigger.Response:
+    """Call the teach handler directly, as rclpy would."""
+    return node._on_set_home(Trigger.Request(), Trigger.Response())
+
+
+def test_set_home_records_the_current_joint_positions(make_node):
+    """The taught pose is whatever the arm is standing at when the service is called."""
+    node = make_node()
+    _feed(node)
+
+    response = _set_home(node)
+
+    assert response.success
+    assert node._home_joints == pytest.approx(TAUGHT)
+
+
+def test_set_home_reads_joints_by_name_not_by_index(make_node):
+    """
+    /joint_states also carries the gripper's joints, in no guaranteed order.
+
+    Taking the first seven positions would record finger widths as arm angles, and the resulting
+    home would be a plan to somewhere the operator never put the arm.
+    """
+    node = make_node()
+    node._on_joint_state(
+        _joint_state(
+            ['fr3_finger_joint1', 'fr3_finger_joint2'] + list(reversed(mb.HOME_JOINT_NAMES)),
+            [0.04, 0.04] + list(reversed(TAUGHT)),
+        )
+    )
+
+    assert _set_home(node).success
+    assert node._home_joints == pytest.approx(TAUGHT)
+
+
+def test_set_home_does_not_move_the_arm(make_node):
+    """Teaching is a read. Planning or executing here would move the arm on a record request."""
+    node = make_node()
+    _stub_plan_ok(node)
+    executed = _capture_execute(node)
+    _feed(node)
+
+    assert _set_home(node).success
+
+    assert executed == []
+    node._joint_plan.call_async.assert_not_called()
+
+
+def test_home_plans_to_the_taught_pose(make_node):
+    """After teaching, /polyumi/home must drive to the taught pose rather than the SRDF one."""
+    node = make_node()
+    _feed(node)
+    _set_home(node)
+    _stub_plan_ok(node)
+    _capture_execute(node)
+
+    assert _home(node).success
+
+    constraints = node._joint_plan.call_async.call_args[0][0].motion_plan_request.goal_constraints[0].joint_constraints
+    assert [c.joint_name for c in constraints] == mb.HOME_JOINT_NAMES
+    assert [c.position for c in constraints] == pytest.approx(TAUGHT)
+
+
+def test_taught_pose_survives_a_restart(make_node, tmp_path):
+    """
+    A pose taught once has to outlive the next bringup, or evals re-teach it every session.
+
+    The second node is a fresh construction against the same file — the restart, in miniature.
+    """
+    pose_file = str(tmp_path / 'persist.yaml')
+    _feed(taught := make_node(home_pose_file=pose_file))
+    assert _set_home(taught).success
+
+    restarted = make_node(home_pose_file=pose_file)
+
+    assert restarted._home_joints == pytest.approx(TAUGHT)
+
+
+def test_taught_pose_outranks_the_home_joints_parameter(make_node, tmp_path):
+    """The file is the more recent, more specific statement of where this task starts."""
+    pose_file = str(tmp_path / 'persist.yaml')
+    _feed(taught := make_node(home_pose_file=pose_file))
+    _set_home(taught)
+
+    restarted = make_node(home_pose_file=pose_file, home_joints=[9.0] * 7)
+
+    assert restarted._home_joints == pytest.approx(TAUGHT)
+
+
+def test_no_taught_pose_falls_back_to_the_srdf_ready_pose(make_node):
+    """With nothing taught, the default behaviour must be exactly what it was before."""
+    node = make_node()
+
+    assert node._home_joints == pytest.approx(mb.HOME_JOINTS)
+
+
+def test_set_home_refuses_a_stale_joint_state(make_node):
+    """
+    A stale cache describes where the arm *used to be*, and recording it is silent.
+
+    The broadcaster dying is the realistic case: joint_states simply stops, the last message
+    stays cached, and nothing on the wire distinguishes it from a stationary arm.
+    """
+    node = make_node()
+    _feed(node)
+    node._joint_state_at = node.get_clock().now() - Duration(seconds=mb.JOINT_STATE_MAX_AGE_S + 5.0)
+
+    response = _set_home(node)
+
+    assert not response.success
+    assert 'stale' in response.message
+    assert node._home_joints == pytest.approx(mb.HOME_JOINTS), 'a refused teach must not change the pose'
+
+
+def test_set_home_refuses_when_nothing_has_published_joint_states(make_node):
+    """Without franka_bringup up there is nothing to record, and the message should say so."""
+    node = make_node()
+
+    response = _set_home(node)
+
+    assert not response.success
+    assert mb.JOINT_STATE_TOPIC in response.message
+
+
+def test_set_home_refuses_a_joint_state_missing_an_arm_joint(make_node):
+    """Six of seven joints would otherwise be recorded with the seventh left at its old value."""
+    node = make_node()
+    _feed(node, positions=TAUGHT[:-1], names=mb.HOME_JOINT_NAMES[:-1])
+
+    response = _set_home(node)
+
+    assert not response.success
+    assert 'fr3_joint7' in response.message
+
+
+def test_set_home_refused_while_a_home_is_in_flight(make_node):
+    """Mid-home the arm is moving, so the cached pose is one it is passing through."""
+    node = make_node()
+    _feed(node)
+    node._busy.acquire()
+    try:
+        response = _set_home(node)
+    finally:
+        node._busy.release()
+
+    assert not response.success
+    assert 'busy' in response.message
+    assert node._home_joints == pytest.approx(mb.HOME_JOINTS)
+
+
+def test_set_home_releases_the_busy_lock_after_a_refusal(make_node):
+    """A failed teach must not wedge the bridge — /polyumi/home still has to work afterwards."""
+    node = make_node()
+
+    assert not _set_home(node).success
+
+    assert node._busy.acquire(blocking=False), 'busy lock left held after a failed set_home'
+    node._busy.release()
+
+
+def test_set_home_still_succeeds_in_memory_when_the_file_cannot_be_written(make_node, tmp_path):
+    """
+    An unwritable file must not lose the pose the operator just taught for this session.
+
+    It does have to be said out loud, though: the difference only shows up after the next
+    bringup, by which time the trial has already started somewhere else.
+    """
+    unwritable = tmp_path / 'nope'
+    unwritable.write_text('not a directory')
+    node = make_node(home_pose_file=str(unwritable / 'pose.yaml'))
+    _feed(node)
+
+    response = _set_home(node)
+
+    assert response.success
+    assert 'in memory only' in response.message
+    assert node._home_joints == pytest.approx(TAUGHT)
+
+
+def test_persistence_can_be_turned_off(make_node):
+    """An empty home_pose_file keeps the taught pose in memory and writes nothing."""
+    node = make_node(home_pose_file='')
+    _feed(node)
+
+    response = _set_home(node)
+
+    assert response.success
+    assert node._home_joints == pytest.approx(TAUGHT)
+    assert node._home_pose_file is None
+
+
+def test_a_pose_file_naming_other_joints_is_ignored(make_node, tmp_path):
+    """
+    Replaying a file written for a different joint set would home somewhere else entirely.
+
+    Positions are matched to names by order, so a file listing seven *other* joints is not a
+    partial answer — it is seven wrong angles applied to fr3_joint1..7.
+    """
+    pose_file = tmp_path / 'foreign.yaml'
+    pose_file.write_text(
+        yaml.safe_dump({'joint_names': [f'panda_joint{i}' for i in range(1, 8)], 'joint_positions': TAUGHT})
+    )
+
+    node = make_node(home_pose_file=str(pose_file))
+
+    assert node._home_joints == pytest.approx(mb.HOME_JOINTS)
+
+
+def test_a_truncated_pose_file_is_ignored(make_node, tmp_path):
+    """A half-written file must not take the bridge down at startup."""
+    pose_file = tmp_path / 'truncated.yaml'
+    pose_file.write_text('joint_names: [fr3_joint1, fr3_jo')
+
+    node = make_node(home_pose_file=str(pose_file))
+
+    assert node._home_joints == pytest.approx(mb.HOME_JOINTS)
+
+
+def test_a_wrong_length_pose_file_is_ignored(make_node, tmp_path):
+    """Six values would zip() short against seven names and home to a partial pose."""
+    pose_file = tmp_path / 'short.yaml'
+    pose_file.write_text(yaml.safe_dump({'joint_names': mb.HOME_JOINT_NAMES, 'joint_positions': TAUGHT[:6]}))
+
+    node = make_node(home_pose_file=str(pose_file))
+
+    assert node._home_joints == pytest.approx(mb.HOME_JOINTS)
+
+
+def test_the_written_file_records_the_joint_names_alongside_the_values(make_node, tmp_path):
+    """The names are what makes the file safe to reload; a bare list of angles is not."""
+    pose_file = tmp_path / 'written.yaml'
+    node = make_node(home_pose_file=str(pose_file))
+    _feed(node)
+
+    assert _set_home(node).success
+
+    doc = yaml.safe_load(pose_file.read_text())
+    assert doc['joint_names'] == mb.HOME_JOINT_NAMES
+    assert doc['joint_positions'] == pytest.approx(TAUGHT)
+    assert 'recorded_at' in doc
+
+
+def test_teaching_twice_overwrites_rather_than_appends(make_node, tmp_path):
+    """Re-teaching is the normal way to nudge a start pose between eval blocks."""
+    pose_file = tmp_path / 'twice.yaml'
+    node = make_node(home_pose_file=str(pose_file))
+    _feed(node)
+    _set_home(node)
+    second = [v + 0.05 for v in TAUGHT]
+    _feed(node, positions=second)
+
+    assert _set_home(node).success
+
+    assert yaml.safe_load(pose_file.read_text())['joint_positions'] == pytest.approx(second)
+    assert make_node(home_pose_file=str(pose_file))._home_joints == pytest.approx(second)

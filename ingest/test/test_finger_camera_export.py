@@ -36,14 +36,19 @@ def _expected_source_frames(scene: pathlib.Path, stride: int) -> np.ndarray:
     """
     Derive, independently of the code, the finger frame index each exported step should carry.
 
-    Rounding the elapsed time onto the finger grid rather than reusing ``nearest_idx`` — a test
-    that calls the function under test to compute its own expectation asserts nothing.
+    Flooring the elapsed time onto the finger grid rather than reusing the exporter's own
+    searchsorted — a test that calls the function under test to compute its own expectation
+    asserts nothing. Floor, not round, because selection is CAUSAL: a step takes the newest frame
+    at or before it, never the nearer one just after. That is what inference can deliver, so it is
+    what training must be built from.
     """
     ep = zarr.open_group(str(scene), mode='r')['episode_0']
     gopro_ts = np.asarray(ep['timestamps/gopro'][:], dtype=np.float64)[::stride]
     finger_ts = np.asarray(ep['timestamps/finger'][:], dtype=np.float64)
     elapsed = (gopro_ts - FINGER_OFFSET_S) - finger_ts[0]
-    return np.clip(np.round(elapsed * FINGER_FPS), 0, len(finger_ts) - 1).astype(np.int64)
+    # +1e-9 absorbs float error on steps that land exactly on a finger stamp, where floor would
+    # otherwise drop to the previous frame depending on the last bit.
+    return np.clip(np.floor(elapsed * FINGER_FPS + 1e-9), 0, len(finger_ts) - 1).astype(np.int64)
 
 
 def _row_values(finger: np.ndarray) -> np.ndarray:
@@ -96,7 +101,7 @@ def test_exported_pixels_are_the_cropped_source(tmp_path: pathlib.Path) -> None:
     assert np.array_equal(finger, source[rows][:, :, X_MIN:])
 
 
-def test_each_step_gets_the_finger_frame_nearest_it_in_the_finger_clock(tmp_path: pathlib.Path) -> None:
+def test_each_step_gets_the_newest_finger_frame_at_or_before_it(tmp_path: pathlib.Path) -> None:
     """
     The alignment contract, and the reason the clock hop is not decorative.
 
@@ -276,3 +281,63 @@ def test_export_dp_on_the_same_scene_carries_no_finger_rgb(tmp_path: pathlib.Pat
 
     assert set(_open_zip(tmp_path / 'vis.zarr.zip')['data'].keys()) == set(EXPECTED_KEYS)
     assert 'modalities' not in provenance[0]
+
+
+def test_selection_never_reaches_forward_in_time(tmp_path: pathlib.Path) -> None:
+    """
+    A step must never carry a finger frame captured after it.
+
+    This is the property that makes training and inference agree: at run time the frame after the
+    observation instant does not exist yet, so a nearest-neighbour pairing here would teach the
+    policy to expect tactile data half a frame period fresher than it can ever be given. Asserted
+    on the exported rows rather than on internals, so it holds for whatever the selection does.
+    """
+    scene = _build_scene(tmp_path, n=30)
+    _add_contact_audio(scene)
+    _add_finger_camera(scene, width=400, height=120)
+    ep = zarr.open_group(str(scene), mode='r')['episode_0']
+    finger_ts = np.asarray(ep['timestamps/finger'][:], dtype=np.float64)
+    gopro_ts = np.asarray(ep['timestamps/gopro'][:], dtype=np.float64)
+
+    rows = _row_values(np.asarray(_export(tmp_path, scene)['data/finger_rgb'][:]))
+
+    # _add_finger_camera paints frame i with the value i, so a row's value is its source index.
+    chosen = finger_ts[rows]
+    steps = gopro_ts[: len(rows)] - FINGER_OFFSET_S
+    assert np.all(chosen <= steps + 1e-9), 'no step may carry a frame captured after it'
+
+
+def test_finger_output_size_override_reaches_the_real_export_path():
+    """
+    The CLI override must reach the exporter, not only the --dry-run preview.
+
+    Those are two separate construction sites, and wiring only the preview produces a run that
+    reports the right plan and then writes a whole corpus at the wrong resolution -- discovered
+    hours later when the policy refuses the shape.
+    """
+    from unittest.mock import patch
+
+    from polyumi_ingest.export.dp.polyumi import export_scenes_to_polyumi
+
+    with patch('polyumi_ingest.export.dp.polyumi.export_scenes_to_dp') as inner:
+        export_scenes_to_polyumi([], pathlib.Path('unused.zarr.zip'), finger_output_size=(224, 224))
+
+    sizes = [m.output_size for m in inner.call_args.kwargs['modalities'] if hasattr(m, 'output_size')]
+    assert sizes == [(224, 224)]
+
+
+def test_finger_output_size_defaults_to_the_configured_value():
+    """Omitted, the export must use config/finger_camera.yaml, so normal runs are unchanged."""
+    from unittest.mock import patch
+
+    from polyumi_ingest.config import load_finger_camera_config
+    from polyumi_ingest.export.dp.polyumi import export_scenes_to_polyumi
+
+    configured = load_finger_camera_config()['output_size']
+    expected = None if configured is None else (int(configured[0]), int(configured[1]))
+
+    with patch('polyumi_ingest.export.dp.polyumi.export_scenes_to_dp') as inner:
+        export_scenes_to_polyumi([], pathlib.Path('unused.zarr.zip'))
+
+    sizes = [m.output_size for m in inner.call_args.kwargs['modalities'] if hasattr(m, 'output_size')]
+    assert sizes == [expected]

@@ -11,7 +11,7 @@ from polyumi_ingest.camera_preproc import crop_finger_rgb
 from polyumi_ingest.config import load_finger_camera_config
 from polyumi_ingest.export.dp.modality import ExportModality
 from polyumi_ingest.pzarr.store import arr
-from polyumi_ingest.timebase import gopro_ts_in_finger_clock, nearest_idx
+from polyumi_ingest.timebase import gopro_ts_in_finger_clock
 
 log = logging.getLogger('export.dp')
 
@@ -28,25 +28,23 @@ class FingerCameraModality(ExportModality):
     """
     The gripper's finger camera on the exported step grid, as ``finger_rgb``.
 
-    Cropped, not resized, by default: the mount occludes a fixed strip of the view that carries
-    no signal, and choosing the encoder's input size belongs with whoever builds the policy. Both
-    the crop and the optional resize come from ``config/finger_camera.yaml`` and are applied here
-    rather than in a preprocessing step, so retuning the crop is a re-export rather than a
-    re-preprocess of the corpus — which matters while the bounds are still an estimate.
+    Cropped, not resized, by default: the mount occludes a fixed strip carrying no signal, and the
+    encoder's input size belongs with whoever builds the policy. Crop and optional resize come from
+    ``config/finger_camera.yaml`` and are applied here, so retuning them is a re-export rather than
+    a re-preprocess of the corpus.
 
-    The finger camera records at ~10 fps against a ~30 Hz step grid, so each step takes the frame
-    nearest it in time and roughly three consecutive rows share one source frame. That is the
-    honest resample — nothing is interpolated — but it means a training config wants
-    ``down_sample_steps`` set accordingly, or an observation window fetches the same image twice.
-    The measured source rate is recorded in the buffer's meta attrs so this is visible from the
-    dataset alone.
+    The camera records at ~10 fps against a ~30 Hz step grid, so each step takes the newest frame
+    at or before it and roughly three rows share one source frame. Nothing is interpolated, but a
+    training config wants ``down_sample_steps`` set accordingly or a window fetches the same image
+    twice. The measured source rate is in the buffer's meta attrs.
 
-    It also stops recording before the GoPro does — measured at ~0.65 s across 111 episodes, with
-    a further ~1 s of GoPro lead at the start that the chirp trim already removes. Steps past the
-    end of the stream are excluded via :meth:`valid_steps` rather than exported: ``nearest_idx``
-    clamps, so exporting them would pair one frozen frame with moving proprioception, and failing
-    the episode outright would fail every episode. Median staleness over the steps that survive is
-    ~0.03 s, comfortably inside the half-frame-period floor.
+    It also stops recording ~0.65 s before the GoPro does (measured over 111 episodes). Steps past
+    the end are excluded by :meth:`valid_steps`: the causal index clamps, so exporting them would
+    pair a frozen frame with moving proprioception.
+
+    Selection is causal so training and inference pair the same way; see :meth:`prepare_episode`.
+    Looking back only, staleness runs up to a full frame period rather than half, which
+    ``max_staleness_s`` has to cover.
     """
 
     name = FINGER_KEY
@@ -55,8 +53,16 @@ class FingerCameraModality(ExportModality):
     #: requires anyway for its start trim.
     required_steps = frozenset()
 
-    def __init__(self) -> None:
-        """Read the crop geometry once, so every episode in a buffer is cut the same way."""
+    def __init__(self, output_size: tuple[int, int] | None = None) -> None:
+        """
+        Read the crop geometry once, so every episode in a buffer is cut the same way.
+
+        ``output_size`` overrides ``config/finger_camera.yaml`` for this export only; ``None``
+        means use the configured value. The override exists because the resolution is a property
+        of the DATASET, not of the rig: one corpus may want native frames and another a 224x224
+        buffer that a policy's shared image_shape can accept, from the same recordings. The size
+        used is written into the buffer's meta attrs either way, so a dataset stays self-describing.
+        """
         cfg = load_finger_camera_config()
         crop = cfg['crop']
         self.crop = {
@@ -65,8 +71,8 @@ class FingerCameraModality(ExportModality):
             'y_min': int(crop['y_min']),
             'y_max': None if crop['y_max'] is None else int(crop['y_max']),
         }
-        output_size = cfg['output_size']
-        self.output_size = None if output_size is None else (int(output_size[0]), int(output_size[1]))
+        cfg_size = cfg['output_size'] if output_size is None else output_size
+        self.output_size = None if cfg_size is None else (int(cfg_size[0]), int(cfg_size[1]))
         self.max_staleness_s = float(cfg['max_staleness_s'])
 
         self._frames: zarr.Array | None = None
@@ -98,8 +104,24 @@ class FingerCameraModality(ExportModality):
         # result but a wrong one: the two devices stamp against unrelated epochs, and without step
         # 1's chirp offset the finger frame chosen for a step is arbitrary.
         gopro_ts_finger = gopro_ts_in_finger_clock(ep, require_offset=True)
-        self._idx = nearest_idx(finger_ts, gopro_ts_finger)
-        self._staleness = np.abs(finger_ts[self._idx] - gopro_ts_finger)
+        # CAUSAL, not nearest: the newest finger frame at or before each step. Inference can only
+        # look backwards -- the frame after the observation instant has not been captured yet --
+        # so choosing the nearest frame here would train the policy on a pairing it can never be
+        # given. At 10 fps the nearest frame sits up to half a period (50 ms) in the future, which
+        # would be a systematic bias toward fresher tactile data at training time than at run time,
+        # not a symmetric error. This matches contact_audio's `block_alignment: causal` and the
+        # backwards-only lookup in policy_client_node._frame_at.
+        #
+        # -1 where no finger frame precedes the step at all (the stream starts after the GoPro).
+        # Those steps get infinite staleness so valid_steps drops them, exactly as it drops the
+        # steps past the end of the stream.
+        self._idx = np.searchsorted(finger_ts, gopro_ts_finger, side='right') - 1
+        self._staleness = np.where(
+            self._idx >= 0,
+            gopro_ts_finger - finger_ts[np.maximum(self._idx, 0)],
+            np.inf,
+        )
+        self._idx = np.maximum(self._idx, 0)
         self._frames = frames
         self._episode_key = episode_key
         if len(finger_ts) >= 2:
@@ -115,7 +137,7 @@ class FingerCameraModality(ExportModality):
         self._shape = shape
 
     def valid_steps(self, steps: np.ndarray) -> np.ndarray:
-        """Mark the steps whose nearest finger frame is close enough in time to be that step."""
+        """Mark the steps whose preceding finger frame is close enough in time to be that step."""
         assert self._staleness is not None, 'prepare_episode must run before valid_steps'
         return self._staleness[steps] <= self.max_staleness_s
 
@@ -130,7 +152,7 @@ class FingerCameraModality(ExportModality):
         if stale[worst] > self.max_staleness_s:
             raise RuntimeError(
                 f'{self._episode_key}: step at GoPro frame {int(gidx[worst])} is '
-                f'{stale[worst]:.3f}s from its nearest finger frame, over the '
+                f'{stale[worst]:.3f}s after its most recent finger frame, over the '
                 f'{self.max_staleness_s:.3f}s limit in config/finger_camera.yaml, yet reached '
                 f'segmentation — the validity mask was bypassed.'
             )

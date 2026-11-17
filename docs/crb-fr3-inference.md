@@ -1,6 +1,6 @@
 # CRB FR3 Inference Setup
 
-**Note for Northwestern CRB members**: This document describes how to run inference on the CRB lab's Franka FR3 arm (in the student office, connected to the NUC with the skull on it). 
+**Note for Northwestern CRB members**: This document describes how to run inference on the CRB lab's Franka FR3 arm (in the student office, connected to the NUC with the skull on it).
 
 **Note for users outside of Northwestern**: This is specific to our equipment, but is likely still useful as an example to bring up an inference setup on your own arm.
 
@@ -8,15 +8,15 @@
 
 In general, to start exploring yourself, bring up the session as described below, after which the following commands are your friends:
 `ros2 topic list`, `ros2 action list`, `ros2 control list_controllers`, `ros2 param dump <node>`. See also the launch files in [`nuc/launch/`](../nuc/launch/) and
-[`ros2_ws/src/polyumi_ros2/launch/`](../ros2_ws/src/polyumi_ros2/launch/). 
+[`ros2_ws/src/polyumi_ros2/launch/`](../ros2_ws/src/polyumi_ros2/launch/).
 
-One note - my SSH alias for the NUC is "jailfranka", which is referred to sometimes in the docs below. 
+One note - my SSH alias for the NUC is "jailfranka", which is referred to sometimes in the docs below.
 
 ## Bringing up inference session
 
 ### Convenience session bringup script
 
-The following script at the root of the repo enables bringing up all of the functionality described below in a convenient tmux session. I'd recommend just starting there. 
+The following script at the root of the repo enables bringing up all of the functionality described below in a convenient tmux session. I'd recommend just starting there.
 
 ```bash
 # step 1: power on the arm, unlock it, and enable FCI
@@ -59,7 +59,7 @@ ros2 launch nuc/launch/fr3_inference.launch.py \
     execute_arm:=true execute_gripper:=true
 ```
 
-**Both execute flags default false** — launching alone never moves the robot. 
+**Both execute flags default false** — launching alone never moves the robot.
 
 `gripper:=hand|faulhaber|none` picks *which* driver, `execute_gripper` decides whether it may move.
 `faulhaber` is `franka_gripper_control` (below) and is the supported path; `hand` is
@@ -92,6 +92,73 @@ cd inference_server && uv run dummy-server    # :8000
 ```
 
 `external/polyumi_diffusion_policy/docker/serve.sh` is the *in-container* entrypoint; you should not run this directly.
+
+**Four settings have to agree with the checkpoint**, and the ones that matter fail *silently* when
+they do not — the policy simply runs on a frame it was never trained on:
+
+| setting | where | applies to | a wrong value does |
+|---|---|---|---|
+| `POLICY` | `serve_policy.sh` env | both | fails loudly: the image cannot unpickle the checkpoint |
+| `SERVE_TACTILE` | `serve_policy.sh` env | **vista only** | server does not require the tactile channels |
+| `send_tactile` | launch arg | both | client does not send them |
+| `n_audio_rows` | launch arg | both | a valid `mic_0` window of the wrong length |
+
+`SERVE_TACTILE` is a Vista-fork variable; its `serve_policy.py` reads it to decide which channels
+are required. The **dp fork ignores it** and reads the channels off the checkpoint's own obs
+encoder instead, so a dp tactile checkpoint (`slip_vt`, `slip_vta`, `slip_ta`) needs no
+server-side flag — it refuses a request missing a channel it was trained on.
+
+`n_audio_rows` has no check anywhere: a window of the wrong length is a valid frame. The node logs
+the resolved value at startup, and that is the only signal.
+
+### Serving, by policy family
+
+On lamb, from the repo root. Pane 3 of `fr3_session.sh` is the policy server, pane 4 the ROS
+client — the two commands have to agree, which is what the table above is about.
+
+**`fr3_session.sh` pre-types both lines, and neither carries the tactile arguments** — they are
+written for a visuomotor `dp` run. Edit the pre-typed line *before* pressing Enter:
+
+- **pane 3** — prepend `POLICY=vista SERVE_TACTILE=1` for a Vista checkpoint. The pre-typed line
+  also auto-selects the newest checkpoint under `data/dp_outputs/`, so replace `CKPT=` outright
+  when the one you want lives elsewhere.
+- **pane 4** — append `send_tactile:=true n_audio_rows:=<N>`. Without them the client sends a
+  visuomotor frame, and a tactile checkpoint refuses every request.
+
+Do not re-run `fr3_session.sh` to fix a pane: it refuses to type into a live session, because
+`send-keys` appends to whatever is already sitting unexecuted in the readline buffer.
+
+**Visuomotor or tactile `dp`.** No tactile flag on the server: the dp fork reads the channels off
+the checkpoint's own obs encoder, so it asks for whatever that checkpoint was trained on.
+
+```bash
+# pane 3 — server
+CKPT=/abs/path/to/epoch=0070-train_loss=0.021.ckpt ./serve_policy.sh
+
+# pane 4 — client. send_tactile only for a checkpoint with finger_rgb/mic_0
+#           (slip_vt, slip_vta, slip_ta, tactile_audio, ...)
+ros2 launch polyumi_ros2 inference_demo.launch.xml pi_host:=<pi IP> \
+    send_tactile:=true n_audio_rows:=10
+```
+
+**Vista.** `SERVE_TACTILE=1` is required — its `serve_policy.py` reads that variable to decide
+which channels the request must carry, and without it the server will accept a frame missing them.
+
+```bash
+# pane 3 — server
+POLICY=vista SERVE_TACTILE=1 CKPT=/abs/path/to/latest.ckpt ./serve_policy.sh
+
+# pane 4 — client
+ros2 launch polyumi_ros2 inference_demo.launch.xml pi_host:=<pi IP> \
+    send_tactile:=true n_audio_rows:=10
+```
+
+`n_audio_rows` must equal the checkpoint's `audio_obs_horizon`, which is a training-time constant,
+not a preference. Read it from the run's `.hydra/config.yaml` (`task.audio_obs_horizon`).
+
+`finger_output_size` likewise has to match what the export stored: pass `-1/-1` for a native-crop
+export (what Vista wants, since its encoders resize internally), or `224/224` for a `*_224` export
+such as the slip corpus. The launch file defaults to -1.
 
 ## 4. Pi
 
@@ -199,10 +266,10 @@ client warns every second naming the topic it expected. The full contract is the
 of `external/franka_streaming_impedance_controller/franka_streaming_impedance_client/franka_streaming_impedance_client/target_chunk.py`;
 which topic *this* deployment uses is `ros2_ws/src/polyumi_ros2/polyumi_ros2/target_chunk.py`.
 
-`fr3_home_service` runs alongside it, serving only `/polyumi/home` — joint-space homing
-through move_group. It and the streaming controller claim the same `<joint>/effort` interfaces, so
-**exactly one holds the arm at a time** — `ros2 control list_controllers` tells you which, and
-`/polyumi/home` swaps them itself around a home move:
+`fr3_home_service` runs alongside it, serving `/polyumi/home` (joint-space homing through
+move_group) and `/polyumi/set_home` (teach that pose). It and the streaming controller claim the
+same `<joint>/effort` interfaces, so **exactly one holds the arm at a time** — `ros2 control
+list_controllers` tells you which, and `/polyumi/home` swaps them itself around a home move:
 
 ```bash
 # Arm must be STATIONARY: switching restarts the libfranka control loop.
@@ -212,6 +279,41 @@ ros2 control switch_controllers --deactivate fr3_arm_controller \
 
 (This is the manual form of the swap `/polyumi/home` does itself, both directions, hands back
 afterwards.)
+
+### A repeatable start pose for evals
+
+Rollouts are only comparable if every trial starts from the same place, and that place is
+task-specific rather than the SRDF `ready` pose. Teach it once, then home before each trial:
+
+```bash
+# 1. Put the arm where trials should start (Desk guiding mode, or any other means).
+# 2. Record it. Does NOT move the arm — it only reads /joint_states.
+ros2 service call /polyumi/set_home std_srvs/srv/Trigger "{}"
+
+# 3. Before every trial. MOVES THE ARM.
+ros2 service call /polyumi/home std_srvs/srv/Trigger "{}"
+```
+
+Both are callable from the laptop despite the rmw gap, as long as the type is spelled out — the
+ROS *graph* does not cross Humble↔Kilted, so `ros2 node list` comes back empty, but service calls
+match on DDS endpoints.
+
+What is worth knowing about it:
+
+- **Joint positions, not a TCP pose.** Replaying Cartesian coordinates would leave the elbow free
+  to come back in a different configuration, which is the trial-to-trial variation this exists to
+  remove.
+- **It persists**, to `~/.ros/polyumi_home_pose.yaml` (`home_pose_file` param; `''` turns
+  persistence off), so it survives the next bringup. The file wins over the `home_joints`
+  parameter — it is the more recent and more specific statement of where the task starts. Delete
+  it to fall back to the SRDF pose.
+- **Which pose is loaded is logged at startup and named in every response**, because a pose
+  taught weeks ago is otherwise indistinguishable from the default until the arm moves.
+- **A stale or absent `/joint_states` is refused rather than recorded.** If the broadcaster dies
+  the last message stays cached, and nothing on the wire distinguishes it from a stationary arm.
+- `set_home` is refused while a home is in flight, since the arm is then somewhere it is merely
+  passing through. It does not know whether a *policy* is driving the arm — only teach between
+  rollouts.
 
 ## The facts you can't deduce by looking
 

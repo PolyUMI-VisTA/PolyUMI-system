@@ -90,6 +90,30 @@ def test_a_failing_probe_is_not_cached(tmp_path: pathlib.Path) -> None:
     assert probe.call_count == 3
 
 
+def test_a_clip_past_a_folder_rollover_is_still_found(tmp_path: pathlib.Path) -> None:
+    """
+    The camera rolls DCIM/100GOPRO over to 101GOPRO once it fills up; both must be scanned.
+
+    Reproduces a real fetch failure: five sessions all "matched" a five-day-old clip because
+    every clip recorded after the rollover sat in 101GOPRO, invisible to a scan of 100GOPRO
+    alone, and no number of retries changed that.
+    """
+    card = _card(tmp_path, 3)  # GX010000-0002 in 100GOPRO, the old, filled-up folder
+    new_dir = card / 'DCIM' / '101GOPRO'
+    new_dir.mkdir()
+    (new_dir / 'GX020000.MP4').write_bytes(b'not really an mp4')
+
+    def _probe(path: pathlib.Path) -> datetime.datetime:
+        if path.parent.name == '101GOPRO':
+            return _EPOCH + datetime.timedelta(days=5)  # recorded long after the old folder
+        return _fake_probe(path)
+
+    with mock.patch.object(gopro_fetch, '_probe_start_time', side_effect=_probe):
+        match = find_gopro_video(_EPOCH + datetime.timedelta(days=5), mount_point=card)
+
+    assert match.name == 'GX020000.MP4'
+
+
 def test_an_explicit_mount_point_skips_card_detection(tmp_path: pathlib.Path) -> None:
     """With the mount resolved by the caller, no udisksctl/lsblk probing happens per session."""
     card = _card(tmp_path, 2)

@@ -26,6 +26,7 @@ def export_scenes_to_polyumi(
     output_path: pathlib.Path,
     enforce_preprocessing: bool = True,
     min_segment_steps: int = MIN_SEGMENT_STEPS,
+    finger_output_size: tuple[int, int] | None = None,
 ) -> tuple[int, list[dict]]:
     """
     Export one or more pzarr scenes to a ``.zarr.zip`` carrying every PolyUMI modality.
@@ -33,11 +34,17 @@ def export_scenes_to_polyumi(
     Identical to :func:`export_scenes_to_dp` in every respect except the extra ``data/`` keys
     (see :data:`POLYUMI_MODALITIES`) and the ``meta.attrs`` describing them. Returns
     ``(n_episodes, provenance)``; each provenance entry gains a ``modalities`` sub-dict.
+
+    ``finger_output_size`` overrides ``config/finger_camera.yaml`` for this export; None uses the
+    configured value. See :class:`FingerCameraModality` for why the size belongs to the dataset
+    rather than to the rig.
     """
     return export_scenes_to_dp(
         scene_paths,
         output_path,
         enforce_preprocessing=enforce_preprocessing,
         min_segment_steps=min_segment_steps,
-        modalities=[cls() for cls in POLYUMI_MODALITIES],
+        modalities=[
+            cls(output_size=finger_output_size) if cls is FingerCameraModality else cls() for cls in POLYUMI_MODALITIES
+        ],
     )

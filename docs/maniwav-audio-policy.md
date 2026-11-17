@@ -1,11 +1,13 @@
 # Adding contact-mic audio to the policy (the ManiWAV recipe)
 
-This is a **handoff document**, not a description of code that exists. PolyUMI's ingest side now
-exports the finger contact mic **and the finger camera**; nothing yet consumes either. What follows
-is the data contract you can build against, why the spectrogram is deliberately *not* precomputed
-for you, and — as an appendix — a checklist of what to port from
+This is the **data contract** for the finger contact mic and the finger camera: what
+`export --type polyumi` writes, why the spectrogram is deliberately *not* precomputed for you,
+and — as an appendix — a checklist of what to port from
 [ManiWAV](https://github.com/real-stanford/maniwav) if you want to follow their recipe rather than
 invent your own. §1.5 covers the finger camera, which has no ManiWAV counterpart and is ours alone.
+
+Both modalities are now consumed end to end — training in `external/polyumi_diffusion_policy`
+(§5), inference in its `serve_policy.py` and in `polyumi_ros2` (§6).
 
 ```
 pingest fetch → process-all → pp (steps 1–6) → export --type polyumi → TRAIN (your container)
@@ -66,7 +68,7 @@ match them exactly — it is a re-export, not a re-preprocess. Either way the ch
 `meta.attrs` records which convention it trained under, and a server must reproduce it.
 
 **Only the contact mic is exported.** ManiWAV carries `mic_0` (contact) and `mic_1` (air); their
-task config uses only `mic_0` anyway. I can add mic_1 if you wish, however.
+task config uses only `mic_0` anyway. `mic_1` can be added later if you want the air mic too.
 
 ---
 
@@ -85,7 +87,7 @@ resolution.
 | `meta.attrs` key | meaning |
 |---|---|
 | `finger_rgb_crop` | the resolved `x_min`/`x_max`/`y_min`/`y_max` bounds |
-| `finger_rgb_output_size` | `null` today — no resize was applied |
+| `finger_rgb_output_size` | the resize applied, or `null` for the native crop |
 | `finger_rgb_shape` | `[648, 982, 3]` at the shipped crop (`x_min: 170` on a 1152x648 frame) |
 | `finger_rgb_source_rate_hz` | ~10, the camera's real frame rate. Read this. |
 | `finger_rgb_max_staleness_s` | how far a step's frame may be from it in time |
@@ -106,9 +108,11 @@ So `finger_rgb` at `[3, 648, 982]` beside `camera0_rgb` at `[3, 224, 224]` fails
 construction, not at runtime. That single `image_shape` also sets the shared `RandomCrop` size and
 `feature_map_shape`, and is indexed as `image_shape[0]` on the assumption of a square. Two ways out:
 
-- **Resize to 224² in your transform** (or ask us to set `output_size: [224, 224]` in
-  `ingest/config/finger_camera.yaml` and re-export — it is a re-export, not a re-preprocess, and it
-  cuts the dataset ~38x). Simplest, and it is why the exporter ships the crop unresized: the
+- **Export it at 224² to begin with**: `pingest export --type polyumi --finger-output-size 224x224`
+  (or set `output_size` in `ingest/config/finger_camera.yaml`). A re-export, not a re-preprocess,
+  and it cuts `finger_rgb` ~13x — at the native crop it is 648·982·3 bytes against camera0_rgb's
+  224·224·3. This is what the slip corpus (`slip_polyumi_224.zarr.zip`) did. Resizing in your
+  transform instead works equally well; the exporter ships the crop unresized because the
   encoder's input size is your decision, not ours to bake in.
 - **Make `image_shape` per-key**, if you want the finger camera at its native resolution. More than
   deleting the assert: the transform build and `feature_map_shape` both have to follow.
@@ -227,49 +231,48 @@ At `samples_per_step = 536` and 16 kHz, an `audio_obs_horizon` of **60** gives
 the size ManiWAV's was, over the same 2 s of wall time. Note their horizon of 120 covers 2 s at
 *their* step rate; ours is half theirs, so the same wall-clock window needs half the steps.
 
+This is what the Vista fork's `polytouch` model does, at `audio_obs_horizon: 64` (2.14 s). Every
+other model there uses 10, which is a ~0.33 s window and a different front end — so the horizon is
+per-model, and `n_audio_rows` at serve time has to match whichever one the checkpoint was trained
+with.
+
 ---
 
 ## 5. Selecting your policy at train time
 
-`train_policy.sh` forwards a `DP_CONFIG` environment variable into the container:
+An audio-consuming task is one workspace config away. For `dp`, `CONFIG_NAME` names it:
 
 ```bash
-DP_CONFIG=train_diffusion_unet_timm_polyumi_audio_workspace \
+CONFIG_NAME=train_diffusion_unet_timm_polyumi_audio_workspace \
 DATASET=/abs/path/to/audio.zarr.zip ./train_policy.sh
 ```
 
-For this to do anything, the fork's `docker/train.sh` must read it:
-
-```bash
---config-name="${DP_CONFIG:-train_diffusion_unet_timm_polyumi_workspace}"
-```
-
-Unset, it keeps today's visuomotor default, so the hook is inert until you wire that half. It is
-an env var rather than a Hydra override because Hydra cannot override `--config-name` through a
-passthrough override.
+`POLICY=vista` works differently — its models are selected with `--model`, because its entrypoint
+is a suite runner that passes its own `--config-name` (see `config/policy.vista.env`). Worked
+examples for both, and the ablation configs, are in
+[training-instructions.md](training-instructions.md) under "Worked examples".
 
 ---
 
-## 6. Inference is not wired yet
+## 6. Inference
 
-Do not wire `mic_0` or `finger_rgb` into `serve_policy.py` expecting it to run on the arm.
+At serve time both keys are rebuilt from live streams, and have to come out as the same numbers the
+exporter wrote. Each is mirrored in the ROS package, with a test asserting the two agree:
 
-`latency.piezo_mic` and `latency.finger_cam` in
-`ros2_ws/src/polyumi_ros2/config/inference.yaml` are 0 because they are unmeasured: measuring
-either needs a rig, and both depend on the Pi being chrony-synced to the ROS host (step 6 of
-[pi-provisioning.md](pi-provisioning.md)). Note that an observation is only as fresh as its
-slowest signal, so adding audio makes the capture instant the oldest across streams.
+| convention | ROS side | parity test |
+|---|---|---|
+| `finger_rgb` crop (§1.5) | `polyumi_ros2/camera_preproc.py` | `ingest/test/test_finger_camera_export.py` |
+| `mic_0` scale + causal alignment (§1) | `polyumi_ros2/audio_preproc.py` | `ingest/test/test_mic0_inference_parity.py` |
 
-What remains is that **the per-stream conventions have to be reproduced exactly at serve time**,
-from live streams rather than stored arrays — the block alignment for `mic_0` (§1), and the crop
-for `finger_rgb` (§1.5). The crop half is already done:
-`ros2_ws/.../polyumi_ros2/camera_preproc.py` carries the same `crop_finger_rgb` the exporter uses,
-with both test suites asserting the same digests, so wiring the finger camera is a subscription
-rather than a re-derivation.
+Which flags a given checkpoint needs at serve time is
+[crb-fr3-inference.md](crb-fr3-inference.md) §3.
 
-Worth doing now regardless: make the server raise at load time if a checkpoint expects a modality
-it cannot supply, so an audio- or finger-camera checkpoint fails loudly instead of being served with
-a missing observation.
+**On latency:** `latency.piezo_mic` and `latency.finger_cam` are `0.0` by measurement, not for
+want of measuring — the Pi stamps at capture. The transport *after* the stamp is the large term,
+and `policy_client_node` anchors every stream on the oldest capture instant to absorb it, so adding
+audio makes the observation only as fresh as its slowest signal. The numbers and the reasoning are
+in [calibration-instructions.md](calibration-instructions.md); both channels still need the Pi
+chrony-synced to the ROS host (step 6 of [pi-provisioning.md](pi-provisioning.md)).
 
 ---
 

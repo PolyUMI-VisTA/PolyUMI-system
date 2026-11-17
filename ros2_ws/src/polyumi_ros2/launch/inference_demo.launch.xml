@@ -2,9 +2,9 @@
 <!--
   Laptop-side inference demo: stream demo + policy_client_node.
 
-  Phase 0 runs everything on the laptop, including the (dummy) inference server
-  at localhost:8000. The FR3 fr3_* TF arrives over DDS from the NUC; source
-  setup_franka_env.sh first. See docs/franka-inference-bringup.md.
+  Everything on the laptop, including a (dummy) inference server at localhost:8000.
+  The FR3 fr3_* TF arrives over DDS from the NUC; source setup_franka_env.sh first.
+  See docs/crb-fr3-inference.md.
 
     ros2 launch polyumi_ros2 inference_demo.launch.xml
     ros2 launch polyumi_ros2 inference_demo.launch.xml pi_host:=10.106.3.110
@@ -51,6 +51,24 @@
   <!-- Inference-loop config: receding-horizon stride + per-component system latencies. -->
   <arg name="inference_config" default="$(find-pkg-share polyumi_ros2)/config/inference.yaml"/>
 
+  <!-- Tactile channels. false serves a visuomotor policy (dp); true adds finger_rgb and mic_0 for
+       the Vista family. Must match the server's SERVE_TACTILE. -->
+  <arg name="send_tactile" default="false"/>
+  <!-- Rows of mic_0 per request. MUST match the checkpoint's audio_obs_horizon: 17 for a
+       checkpoint trained before the fork's shared-audio alignment, 10 after it. -->
+  <arg name="n_audio_rows" default="17"/>
+  <!-- finger_rgb resize AFTER the crop. Defaults to 224 because every DP-fork checkpoint
+       currently in use (slip_vt, slip_vta, slip_ta) shares one image_shape across camera0_rgb
+       and finger_rgb, per its *_224 export; diffusion_policy's TimmObsEncoder asserts the
+       shapes match rather than resizing, so a mismatch is a bare AssertionError, not a silently
+       wrong input. Pass -1/-1 explicitly for a Vista-family checkpoint instead, whose encoder
+       resizes internally and expects the native, unresized crop. These override inference.yaml
+       unconditionally (they load after it, and later params win): editing inference.yaml's own
+       finger_output_size does nothing unless these are also passed matching it, so set the value
+       here, not there. -->
+  <arg name="finger_output_width" default="224"/>
+  <arg name="finger_output_height" default="224"/>
+
   <include file="$(find-pkg-share polyumi_ros2)/launch/stream_demo.launch.xml">
     <arg name="pi_host" value="$(var pi_host)"/>
     <arg name="video_device" value="$(var video_device)"/>
@@ -67,5 +85,18 @@
     <param name="post_timeout_s" value="$(var post_timeout_s)"/>
     <param name="tf_use_latest" value="$(var tf_use_latest)"/>
     <param from="$(var inference_config)"/>
+    <!-- AFTER the config file on purpose: later params win in ROS 2 launch, so these two are the
+         only way to steer them per run without editing inference.yaml. Which policy is being
+         served decides both, and the answer changes between one rollout and the next.
+
+         Only send_tactile matches inference.yaml's value; n_audio_rows (17 here, 10 there) and
+         finger_output_size (224 here, -1 there) deliberately do not, so THESE defaults are what
+         a plain launch applies. send_tactile must match the server's SERVE_TACTILE, and
+         n_audio_rows the checkpoint's audio_obs_horizon — neither is detectable at runtime, so
+         both are logged at startup. -->
+    <param name="send_tactile" value="$(var send_tactile)"/>
+    <param name="n_audio_rows" value="$(var n_audio_rows)"/>
+    <param name="finger_output_size.width" value="$(var finger_output_width)"/>
+    <param name="finger_output_size.height" value="$(var finger_output_height)"/>
   </node>
 </launch>

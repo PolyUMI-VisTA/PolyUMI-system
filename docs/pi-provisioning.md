@@ -1,6 +1,6 @@
 # Raspberry Pi Provisioning
 
-This project uses [cloud-init](https://cloudinit.readthedocs.io/) to automate first-boot Pi setup. The version-controlled template lives at [`infra/cloud-init/user-data.example`](../infra/cloud-init/user-data.example); you create your local [`infra/cloud-init/user-data`](../infra/cloud-init/user-data) from it before flashing. Flashing a new Pi takes about 5-10 minutes of mostly hands-off time.
+This project uses [cloud-init](https://cloudinit.readthedocs.io/) to automate first-boot Pi setup. The version-controlled template lives at [`infra/cloud-init/user-data.example`](../infra/cloud-init/user-data.example); you create your local `infra/cloud-init/user-data` from it before flashing. Flashing a new Pi takes about 5-10 minutes of mostly hands-off time.
 
 ## What cloud-init handles automatically
 
@@ -153,7 +153,7 @@ lsmod | grep pwm
 
 **DO NOT PERFORM THIS STEP IF THIS PI IS FOR THE END-EFFECTOR.** We don't need a startup service there since we don't record, we only stream.
 
-Cloud-init installs `polyumi-pi.service` but leaves it disabled, because `start-scene` needs a saved GoPro pairing to launch. 
+Cloud-init installs `polyumi-pi.service` but leaves it disabled, because `start-scene` needs a saved GoPro pairing to launch.
 
 First, turn on the GoPro attached to the UMI, and then run the pairing command from the pi:
 
