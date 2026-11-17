@@ -5,7 +5,7 @@
 **Project website:** https://polyumi-vista.github.io/<br>
 **Hardware build guide (incl. CAD files, BOM, etc):** [Google Doc](https://docs.google.com/document/d/1T0v_7H8YAJjOud9QWYlQct29a78YKvELPIpKTzajFs0/edit?usp=sharing)
 
-PolyUMI is a multimodal robot learning policy data collection, training, and inference platform, which enables **rapid iteration on imitation learning policies beyond visuomotor**. It unifies the following modalities in a single end-effector:
+PolyUMI is a multimodal robot learning policy data collection, training, and deployment platform, which enables **rapid iteration on imitation learning policies beyond visuomotor**. It unifies the following modalities in a single end-effector:
 - **touch** (via a custom optical tactile-sensing finger, based on [PolyTouch](https://polytouch.alanz.info/))
 - **mechanical vibration** (via a contact microphone on the finger)
 - **vision** (via GoPro camera on wrist + finger camera peripheral vision)
