@@ -181,7 +181,7 @@ handles the ones it can and exposes the rest as env vars.
 3. **Shared memory.** The PyTorch DataLoader needs more than Docker's 64 MB default `/dev/shm`
    or workers crash with a bus error. The script sets `--shm-size=8g` (override with `SHM_SIZE`).
    Do **not** use `--ipc=host` under rootless.
-4. **Networking (inference).** Publish with `-p 8000:8000`. Do **not** use `--network host` —
+4. **Networking (inference).** Publish with `-p 8002:8000`, matching the wrapper's default. Do **not** use `--network host` —
    under rootless it shares the rootless net namespace, not the real host.
 5. **Storage / no registry.** Build on the workstation from the fork checkout; rootless image
    storage lives under your home. Pruning the fork (a later task) shrinks the image.
@@ -243,7 +243,7 @@ CKPT=/abs/path/to/epoch=0070-train_loss=0.021.ckpt ./serve_policy.sh
 The equivalent raw command, if you'd rather not use the wrapper:
 
 ```bash
-docker run --rm -it --gpus all --user 0:0 -p 8000:8000 \
+docker run --rm -it --gpus all --user 0:0 -p 8002:8000 \
     -e HOME=/tmp -e HF_HOME=/hf_cache \
     -e CKPT_PATH=/data/model.ckpt \
     -v /abs/path/to/epoch=0070-train_loss=0.021.ckpt:/data/model.ckpt:ro \
@@ -256,8 +256,8 @@ weights (~600 MB) so the server doesn't re-download them on every start — the 
 `train_policy.sh` uses. `--gpus all` and `--user 0:0` mirror the training flags (GPU access;
 rootless-safe uid). Mounting the checkpoint *file* to a clean path sidesteps the `=` in its name.
 
-`policy_client_node` then POSTs to `http://<workstation>:8000/predict_cartesian/` — the same
-call it makes to the dummy server today, so nothing changes on the ROS side but the URL.
+Set the client's `inference_server_url` to `http://<workstation>:8002/predict_cartesian/`
+(or the port selected with `PORT`). The launch file defaults to the dummy server on port 8000.
 
 `serve_policy.py` serves the EMA weights and converts the relative action chunk back to absolute
 EEF poses. It has one endpoint beyond `/predict_cartesian/`: the client must `POST /reset
@@ -267,32 +267,21 @@ current pose and warns. Running it on the arm is [crb-fr3-inference.md](crb-fr3-
 
 ## Vista
 
-`POLICY=vista` runs Rickmer's multimodal zoo — vision (`camera0_rgb`) + finger camera
-(`finger_rgb`) + contact mic (`mic_0`) + proprioception, with an encoder / fusion / head /
-objective cross-product. Architecture, registries and the porting map are in the fork's
+`POLICY=vista` runs the multimodal models using vision (`camera0_rgb`), finger camera
+(`finger_rgb`), contact mic (`mic_0`) and proprioception. Architecture and model details are in the fork's
 [`docs/VISTA_AGENT_GUIDE.md`](../external/polyumi_vista_policy/docs/VISTA_AGENT_GUIDE.md).
 
-The submodule is **private** (`RiicK3d/polyumi_vista_policy`), so `git submodule update --init
+The submodule is **private** (`RickmerKrohn/polyumi_vista_policy`), so `git submodule update --init
 external/polyumi_vista_policy` needs collaborator access.
 
-**lamb's copy is hand-managed, and `deploy_lamb.sh` deliberately does not sync it** — it is in
-that script's exclude list, and the deploy only checks that it is present. The checkpoints under
-`data/dp_outputs/` were trained against a working copy that is not any commit of the fork, so
-overwriting it by rsync makes them unloadable. Update lamb's copy by hand when you mean to, and
-expect a fresh lamb to need it put there by hand once.
+**lamb's copy is hand-managed: `deploy_lamb.sh` does not sync it.** Preserve the working copy
+that existing checkpoints require, and install a matching checkout manually on a fresh lamb.
 
-The entrypoint is `scripts/train_day0suite.sh`, a suite runner over eight models: four full
-multimodal (`vista`, `touch_in_the_wild`, `see_hear_feel`, `sparsh_x`), two vision-only
-(`vista_v`, `sparsh_x_v`), two vision+tactile (`vista_vt`, `touch_in_the_wild_vt`). A bare
-invocation trains **all eight back to back**, so narrow it with `--model`:
-
-```bash
-POLICY=vista DATASET=/abs/path/to/day0suite.zarr.zip \
-    ./train_policy.sh --model vista_vt training.max_epochs=2 logging.mode=offline
-```
-
-Note `training.max_epochs`, not the visuomotor config's `training.num_epochs`. `DRY_RUN=1` prints
-the `train_vista.py` command lines each model would run and exits.
+The suite runner supports six models: `see_hear_feel`, `sparsh_x`, `polytouch`, `qformer`,
+`mitas` and `vta_diffusion`. Without `--model`, it trains **all six sequentially**. Use the
+[worked examples](#worked-examples) to select one model and pass Hydra overrides after `--`.
+These configs use `training.num_epochs`. `DRY_RUN=1` prints the `train_vista.py` commands
+without training.
 
 ### Running the fork's tests
 
@@ -310,16 +299,9 @@ docker run --rm --user 0:0 \
 CPU-only, no GPU flag needed. The HF-cache mount is for the AST audio encoder, which the `va` and
 `vta` ablation groups pull from the hub on first run.
 
-> **`vista/data/` is missing from the fork**, so nothing that touches the dataset runs yet — the
-> repo's `.gitignore` has an unanchored `data` pattern, which git applies at every depth, and the
-> package was silently never committed. That is why the command above names those two test files:
-> `test/test_vista_dataset.py` fails at import, and training fails on
-> `vista/config/task/day0suite.yaml`'s `_target_: vista.data.vista_dataset.VistaDataset`. Fix is
-> upstream — anchor the pattern (`/data`) and commit the package.
-
 ## What is out of scope here
 
-Calibration (`T_gopro_to_fingertip`, `latency.gopro`, the `eef_frame` static TF) is a separate ticket
-and does **not** gate training: the task config sets `dataset_frequeny: 0`, which zeroes every
-`latency_steps`, so the latency numbers are inert during training. A policy trained now will not
-*deploy* correctly until calibration lands, but its loss curve is meaningful.
+Robot calibration (`T_gopro_to_fingertip`, `latency.gopro`, the `eef_frame` static TF) is separate
+from training. The task config sets `dataset_frequeny: 0`, which zeroes every `latency_steps`,
+so these latency settings do not affect training. Before deployment, follow
+[calibration-instructions.md](calibration-instructions.md) for the hardware in use.

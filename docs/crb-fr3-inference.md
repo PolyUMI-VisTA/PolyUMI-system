@@ -93,56 +93,47 @@ cd inference_server && uv run dummy-server    # :8000
 
 `external/polyumi_diffusion_policy/docker/serve.sh` is the *in-container* entrypoint; you should not run this directly.
 
-**Four settings have to agree with the checkpoint**, and the ones that matter fail *silently* when
-they do not — the policy simply runs on a frame it was never trained on:
+**Match the serving settings to the checkpoint.** Missing channels cause errors; the wrong audio
+window or image geometry can instead produce valid inputs that differ from training:
 
 | setting | where | applies to | a wrong value does |
 |---|---|---|---|
 | `POLICY` | `serve_policy.sh` env | both | fails loudly: the image cannot unpickle the checkpoint |
 | `SERVE_TACTILE` | `serve_policy.sh` env | **vista only** | server does not require the tactile channels |
 | `send_tactile` | launch arg | both | client does not send them |
-| `n_audio_rows` | launch arg | both | a valid `mic_0` window of the wrong length |
+| `n_audio_rows` | launch arg | audio checkpoints | a valid `mic_0` window of the wrong length |
+| `finger_output_width`, `finger_output_height` | launch args | finger-camera checkpoints | different image geometry from training |
 
-`SERVE_TACTILE` is a Vista-fork variable; its `serve_policy.py` reads it to decide which channels
-are required. The **dp fork ignores it** and reads the channels off the checkpoint's own obs
-encoder instead, so a dp tactile checkpoint (`slip_vt`, `slip_vta`, `slip_ta`) needs no
-server-side flag — it refuses a request missing a channel it was trained on.
-
-`n_audio_rows` has no check anywhere: a window of the wrong length is a valid frame. The node logs
-the resolved value at startup, and that is the only signal.
+The dp server reads required channels from the checkpoint's obs encoder and ignores
+`SERVE_TACTILE`; Vista uses that flag to require `finger_rgb` and `mic_0`. For either server,
+`send_tactile:=true` makes the client send both channels.
 
 ### Serving, by policy family
 
-On lamb, from the repo root. Pane 3 of `fr3_session.sh` is the policy server, pane 4 the ROS
-client — the two commands have to agree, which is what the table above is about.
-
-**`fr3_session.sh` pre-types both lines, and neither carries the tactile arguments** — they are
-written for a visuomotor `dp` run. Edit the pre-typed line *before* pressing Enter:
-
-- **pane 3** — prepend `POLICY=vista SERVE_TACTILE=1` for a Vista checkpoint. The pre-typed line
-  also auto-selects the newest checkpoint under `data/dp_outputs/`, so replace `CKPT=` outright
-  when the one you want lives elsewhere.
-- **pane 4** — append `send_tactile:=true n_audio_rows:=<N>`. Without them the client sends a
-  visuomotor frame, and a tactile checkpoint refuses every request.
+Run these from the repo root on lamb: pane 3 is the server and pane 4 is the ROS client.
+`fr3_session.sh` pre-types commands for a visuomotor dp run, selecting the newest checkpoint
+under `data/dp_outputs/`. Edit the checkpoint path and add the relevant arguments below
+**before pressing Enter**.
 
 Do not re-run `fr3_session.sh` to fix a pane: it refuses to type into a live session, because
 `send-keys` appends to whatever is already sitting unexecuted in the readline buffer.
 
-**Visuomotor or tactile `dp`.** No tactile flag on the server: the dp fork reads the channels off
-the checkpoint's own obs encoder, so it asks for whatever that checkpoint was trained on.
+**Tactile `dp`, using a 224×224 finger export and 10 audio rows:**
 
 ```bash
 # pane 3 — server
 CKPT=/abs/path/to/epoch=0070-train_loss=0.021.ckpt ./serve_policy.sh
 
-# pane 4 — client. send_tactile only for a checkpoint with finger_rgb/mic_0
-#           (slip_vt, slip_vta, slip_ta, tactile_audio, ...)
+# pane 4 — client
 ros2 launch polyumi_ros2 inference_demo.launch.xml pi_host:=<pi IP> \
-    send_tactile:=true n_audio_rows:=10
+    inference_server_url:=http://localhost:8002/predict_cartesian/ \
+    send_tactile:=true n_audio_rows:=10 \
+    finger_output_width:=224 finger_output_height:=224
 ```
 
-**Vista.** `SERVE_TACTILE=1` is required — its `serve_policy.py` reads that variable to decide
-which channels the request must carry, and without it the server will accept a frame missing them.
+For a visuomotor dp checkpoint, omit the tactile client arguments.
+
+**Vista, using the native finger crop and 10 audio rows:**
 
 ```bash
 # pane 3 — server
@@ -150,15 +141,20 @@ POLICY=vista SERVE_TACTILE=1 CKPT=/abs/path/to/latest.ckpt ./serve_policy.sh
 
 # pane 4 — client
 ros2 launch polyumi_ros2 inference_demo.launch.xml pi_host:=<pi IP> \
-    send_tactile:=true n_audio_rows:=10
+    inference_server_url:=http://localhost:8002/predict_cartesian/ \
+    send_tactile:=true n_audio_rows:=10 \
+    finger_output_width:=-1 finger_output_height:=-1
 ```
 
-`n_audio_rows` must equal the checkpoint's `audio_obs_horizon`, which is a training-time constant,
-not a preference. Read it from the run's `.hydra/config.yaml` (`task.audio_obs_horizon`).
+Replace `n_audio_rows:=10` with the checkpoint's `task.audio_obs_horizon` from its saved
+`.hydra/config.yaml` (for example, PolyTouch uses 64). The client logs the resolved value but
+does not check it against the checkpoint.
 
-`finger_output_size` likewise has to match what the export stored: pass `-1/-1` for a native-crop
-export (what Vista wants, since its encoders resize internally), or `224/224` for a `*_224` export
-such as the slip corpus. The launch file defaults to -1.
+The finger output must match the export: `224/224` for a `*_224` export such as the slip corpus,
+or `-1/-1` for a native crop. Vista center-crops the native 648×982 image to a square before
+resizing; sending a 224×224 squeeze first changes its field of view. **Both launch arguments
+default to 224 and override `inference.yaml`**, so pass `-1/-1` explicitly for Vista and for dp
+checkpoints trained on native crops with encoder-side resizing.
 
 ## 4. Pi
 

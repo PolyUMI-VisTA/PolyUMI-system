@@ -93,33 +93,21 @@ resolution.
 | `finger_rgb_max_staleness_s` | how far a step's frame may be from it in time |
 | `finger_rgb_source` | `finger/frames` |
 
-Three things about it will shape your config, and the first is the one that bites at import time.
+**Choose where to resize the finger image.** The dp fork's `TimmObsEncoder` supports a per-key
+`resize` in `shape_meta.obs`. RGB keys must have the same spatial shape *after* that resize:
 
-**UMI's encoder assumes every RGB key has the same spatial shape.** In
-`diffusion_policy/model/vision/timm_obs_encoder.py`:
+- **Keep the native export:** set `finger_rgb.shape: [3, 648, 982]` and
+  `finger_rgb.resize: [224, 224]` alongside `camera0_rgb.shape: [3, 224, 224]`. The shipped
+  `polyumi_tactile` and `polyumi_tactile_audio` tasks do this. The encoder resizes before its
+  augmentation transforms; no encoder change or re-export is needed.
+- **Export at 224×224:** pass `--finger-output-size 224x224` to `pingest export --type polyumi`
+  (or set `output_size` in `ingest/config/finger_camera.yaml`), then declare
+  `finger_rgb.shape: [3, 224, 224]`. This saves storage and is how the slip corpus
+  (`slip_polyumi_224.zarr.zip`) was exported.
 
-```python
-if type == 'rgb':
-    assert image_shape is None or image_shape == shape[1:]
-    image_shape = shape[1:]
-```
-
-So `finger_rgb` at `[3, 648, 982]` beside `camera0_rgb` at `[3, 224, 224]` fails at encoder
-construction, not at runtime. That single `image_shape` also sets the shared `RandomCrop` size and
-`feature_map_shape`, and is indexed as `image_shape[0]` on the assumption of a square. Two ways out:
-
-- **Export it at 224² to begin with**: `pingest export --type polyumi --finger-output-size 224x224`
-  (or set `output_size` in `ingest/config/finger_camera.yaml`). A re-export, not a re-preprocess,
-  and it cuts `finger_rgb` ~13x — at the native crop it is 648·982·3 bytes against camera0_rgb's
-  224·224·3. This is what the slip corpus (`slip_polyumi_224.zarr.zip`) did. Resizing in your
-  transform instead works equally well; the exporter ships the crop unresized because the
-  encoder's input size is your decision, not ours to bake in.
-- **Make `image_shape` per-key**, if you want the finger camera at its native resolution. More than
-  deleting the assert: the transform build and `feature_map_shape` both have to follow.
-
-Note `share_rgb_model: False` (the default) already gives each RGB key its own deepcopy of the
-backbone, so two cameras at two resolutions is not a problem for the model itself — only for the
-shape bookkeeping above.
+Serve the same pre-encoder image geometry used in training; the launch arguments are in
+[crb-fr3-inference.md](crb-fr3-inference.md#serving-by-policy-family). Vista has its own
+center-crop-and-resize preprocessing and expects the native crop.
 
 **The camera runs at ~10 fps against a ~30 Hz step grid.** Each step gets the frame nearest it in
 time, so roughly three consecutive rows hold the *same* image. Nothing is interpolated — a policy
@@ -267,12 +255,13 @@ exporter wrote. Each is mirrored in the ROS package, with a test asserting the t
 Which flags a given checkpoint needs at serve time is
 [crb-fr3-inference.md](crb-fr3-inference.md) §3.
 
-**On latency:** `latency.piezo_mic` and `latency.finger_cam` are `0.0` by measurement, not for
-want of measuring — the Pi stamps at capture. The transport *after* the stamp is the large term,
-and `policy_client_node` anchors every stream on the oldest capture instant to absorb it, so adding
-audio makes the observation only as fresh as its slowest signal. The numbers and the reasoning are
-in [calibration-instructions.md](calibration-instructions.md); both channels still need the Pi
-chrony-synced to the ROS host (step 6 of [pi-provisioning.md](pi-provisioning.md)).
+**On latency:** `latency.piezo_mic` and `latency.finger_cam` are set to `0.0` because the Pi
+timestamps capture; this is not a measurement of zero sensor or analog-path delay. The measured
+transport delay falls *after* the timestamp. `policy_client_node` uses the oldest capture instant
+covered by all enabled streams to align them. See
+[calibration-instructions.md](calibration-instructions.md) for the measurements and remaining
+uncertainty. Both channels require the Pi to be chrony-synced to the ROS host (step 6 of
+[pi-provisioning.md](pi-provisioning.md)).
 
 ---
 

@@ -51,21 +51,16 @@
   <!-- Inference-loop config: receding-horizon stride + per-component system latencies. -->
   <arg name="inference_config" default="$(find-pkg-share polyumi_ros2)/config/inference.yaml"/>
 
-  <!-- Tactile channels. false serves a visuomotor policy (dp); true adds finger_rgb and mic_0 for
-       the Vista family. Must match the server's SERVE_TACTILE. -->
+  <!-- true adds finger_rgb and mic_0 for tactile checkpoints. For Vista, match SERVE_TACTILE;
+       the dp server instead reads required channels from the checkpoint. -->
   <arg name="send_tactile" default="false"/>
-  <!-- Rows of mic_0 per request. MUST match the checkpoint's audio_obs_horizon: 17 for a
-       checkpoint trained before the fork's shared-audio alignment, 10 after it. -->
+  <!-- Rows of mic_0 per request. Match the checkpoint's audio_obs_horizon: most current Vista
+       configs use 10, PolyTouch uses 64, and older checkpoints may use 17. -->
   <arg name="n_audio_rows" default="17"/>
-  <!-- finger_rgb resize AFTER the crop. Defaults to 224 because every DP-fork checkpoint
-       currently in use (slip_vt, slip_vta, slip_ta) shares one image_shape across camera0_rgb
-       and finger_rgb, per its *_224 export; diffusion_policy's TimmObsEncoder asserts the
-       shapes match rather than resizing, so a mismatch is a bare AssertionError, not a silently
-       wrong input. Pass -1/-1 explicitly for a Vista-family checkpoint instead, whose encoder
-       resizes internally and expects the native, unresized crop. These override inference.yaml
-       unconditionally (they load after it, and later params win): editing inference.yaml's own
-       finger_output_size does nothing unless these are also passed matching it, so set the value
-       here, not there. -->
+  <!-- Resize finger_rgb after cropping, matching the training export's stored image size.
+       224/224 matches the DP *_224 exports. For Vista pass -1/-1 to preserve the native crop
+       for its center-square crop and resize. These launch arguments override inference.yaml;
+       encoder-side resizing cannot undo a different crop or aspect-ratio change. -->
   <arg name="finger_output_width" default="224"/>
   <arg name="finger_output_height" default="224"/>
 
@@ -85,15 +80,9 @@
     <param name="post_timeout_s" value="$(var post_timeout_s)"/>
     <param name="tf_use_latest" value="$(var tf_use_latest)"/>
     <param from="$(var inference_config)"/>
-    <!-- AFTER the config file on purpose: later params win in ROS 2 launch, so these two are the
-         only way to steer them per run without editing inference.yaml. Which policy is being
-         served decides both, and the answer changes between one rollout and the next.
-
-         Only send_tactile matches inference.yaml's value; n_audio_rows (17 here, 10 there) and
-         finger_output_size (224 here, -1 there) deliberately do not, so THESE defaults are what
-         a plain launch applies. send_tactile must match the server's SERVE_TACTILE, and
-         n_audio_rows the checkpoint's audio_obs_horizon — neither is detectable at runtime, so
-         both are logged at startup. -->
+    <!-- Later parameters win: these launch defaults override inference.yaml, including
+         n_audio_rows (17 here, 10 there) and finger_output_size (224 here, -1 there).
+         For Vista, match send_tactile to SERVE_TACTILE; match sizes and row count to the checkpoint. -->
     <param name="send_tactile" value="$(var send_tactile)"/>
     <param name="n_audio_rows" value="$(var n_audio_rows)"/>
     <param name="finger_output_size.width" value="$(var finger_output_width)"/>

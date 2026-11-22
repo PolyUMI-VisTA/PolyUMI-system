@@ -1,6 +1,6 @@
 # policy_client_node inference config: control cadence + per-component system latencies.
-# Loaded by inference_demo.launch.xml via `<param from="...">`. This is the single place to
-# tune how the on-arm inference loop runs; the node's own declared defaults mirror these.
+# Loaded by inference_demo.launch.xml. Explicit launch parameters override this file;
+# see docs/crb-fr3-inference.md for the checkpoint-specific launch arguments.
 
 /**:
   ros__parameters:
@@ -18,26 +18,16 @@
     # are ignored.
     n_action_steps: 16
 
-    # Temporal ensembling: recency decay constant, in seconds, for blending each new action chunk
-    # with the recent chunks that overlap it (polyumi_ros2/temporal_ensemble.py). 0 disables it.
-    #
-    # The policy re-predicts its whole horizon every steps_per_inference ticks and the successive
-    # predictions do not agree, so executing each new chunk at face value steps the commanded
-    # target by however much the model changed its mind. Blending trades reactivity for smoothness:
-    # larger values average in staler predictions, so the arm is slower to respond to genuinely new
-    # information — which for contact-critical work is the wrong thing to be slow at. Hence a value
-    # on the order of ONE stride (steps_per_inference * 1/control_hz = 0.3s here), which smooths the
-    # handoff between consecutive chunks without averaging over a meaningfully stale window.
-    #
-    # Starting point, not a measured value: tune it against measured jerk, A/B, with the arm's
-    # own motion. (The plot_measured_motion.py helper that did this was removed upstream.)
+    # Recency decay constant (seconds) for blending overlapping action chunks. 0 disables it.
+    # Larger values retain older predictions, trading responsiveness for smoother transitions.
+    # Tune against measured motion; this is not a calibrated latency.
     temporal_ensemble_tau_s: 0.0
 
     # --- Per-component latencies, in seconds. ---
-    # Measured with `ros2 run polyumi_ros2 latency_probe`, one mode per value. Procedures and what
-    # each number does and does not cover: docs/calibration-instructions.md, "Latencies".
+    # Measurements, assumptions and calibration procedures are documented under "Latencies"
+    # in docs/calibration-instructions.md. Not every value below has been measured.
     #
-    # Only ONE of these needs a rig. The budget is
+    # The budget is
     #
     #   photon --(gopro)--> header.stamp --(measured live)--> response --(arm_exec)--> motion
     #
@@ -57,24 +47,12 @@
       # calibrated 2026-08-11 on the crb's fr3 arm setup.
       gopro: 0.1087
 
-      # Finger camera latency: the span from photon to the frame's ROS header stamp.
-      #
-      # 0.0 is a MEASURED value, not an unset one. The Pi stamps at capture in hardware, so the
-      # stamp already is the capture instant and there is no pre-stamp delay to correct. This is
-      # the opposite situation to gopro above, where v4l2_camera stamps at dequeue and the whole
-      # chain sits ahead of the stamp.
-      #
-      # It does NOT mean the finger camera is as timely as the wrist camera. Its transport runs
-      # after the stamp -- JPEG encode, the ZMQ hop, the link, the receive loop -- measured at
-      # 161 ms median over the USB gadget link on 2026-09-08. That delay is why policy_client_node
-      # anchors on the OLDEST capture instant across streams (_observation_instant) rather than the
-      # wrist camera's; it cannot be expressed as a constant here, because it shifts which sample
-      # is available rather than when that sample was taken.
+      # Residual photon-to-header delay. The Pi uses the camera's capture timestamp, so no
+      # extra correction is applied. This is distinct from post-stamp transport, measured at
+      # 161 ms median on 2026-09-08, which _observation_instant handles when aligning streams.
       finger_cam: 0.0
-      # Piezo mic latency. 0.0 for the same reason as finger_cam: polyumi_pi/clock.py removes the
-      # capture buffer's occupancy from the stamp, so the stamp is the true capture instant of the
-      # first sample in the block. Its post-stamp transport is handled by _observation_instant, as
-      # the finger camera's is.
+      # Residual mic-to-header delay. The Pi removes capture-buffer occupancy from the stamp;
+      # analog/ADC delay remains unconfirmed, so 0.0 is an assumption, not a measured zero.
       piezo_mic: 0.0
       # Delay from the arm's true EE pose to its measurement appearing on TF.
       #
@@ -154,49 +132,25 @@
     gripper_max_width_m: 0.0812
     gripper_min_width_m: 0.0
 
-    # --- Tactile channels: the finger camera and the contact mic. ---
-    # OFF by default, so a visuomotor policy (POLICY=dp) is served exactly as it was before these
-    # existed — it requires neither channel and sending them would only cost bandwidth. Turn on
-    # for the Vista family (vista, sparsh_x, polytouch, see_hear_feel), every member of which
-    # indexes obs['finger_rgb'] and obs['mic_0'] unconditionally.
-    #
-    # Both channels are all-or-nothing per request: if either is missing or stale the tick is
-    # skipped rather than a partial frame sent, because the wire format refuses per-channel
-    # omission server-side (see polyumi_inference.types.Observation.require).
+    # Enable finger_rgb and mic_0 together for a checkpoint that needs tactile input.
+    # For Vista, match the server's SERVE_TACTILE setting; dp reads the checkpoint's channels.
+    # Missing or stale input skips the tick.
     send_tactile: false
-    # The /pi prefix is the launch file's namespace for pi_receiver_node, which publishes
-    # these under relative names. Without it these resolve to topics nothing publishes and
-    # every tick is skipped for "tactile channels incomplete" -- valid-looking and silent.
+    # pi_receiver_node publishes these relative to its /pi launch namespace.
     finger_image_topic: /pi/camera/image/compressed
     audio_topic: /pi/audio/raw
 
-    # Rows of mic_0 per request — the policy's `audio_obs_horizon`.
-    #
-    # THIS MUST MATCH THE CHECKPOINT and nothing downstream can catch it being wrong: a window of
-    # the wrong length is a perfectly valid frame that the policy was simply never trained on. 10
-    # is the Vista fork's current shared contract (10 x 536 samples = ~0.33 s; see its
-    # docs/SENSOR_PROCESSING.md). A checkpoint trained before that alignment wants 17. The node
-    # logs the resolved value at startup for exactly this reason.
-    #
-    # NOTE inference_demo.launch.xml passes this as a launch arg AFTER loading this file, so its
-    # own default wins over the value here. Set it there, or pass n_audio_rows:= on the command
-    # line; editing it here alone has no effect through that launch file.
+    # Rows of mic_0 per request; must match the checkpoint's audio_obs_horizon.
+    # Most current Vista configs use 10 (~0.33 s); PolyTouch uses 64. Older checkpoints may use 17.
+    # The launch argument overrides this value and defaults to 17: pass n_audio_rows explicitly.
     n_audio_rows: 10
 
-    # The finger_rgb crop. THIS IS THE CONTRACT: a policy trained on one crop cannot be served
-    # frames from another. These mirror ingest/config/finger_camera.yaml, where the provenance of
-    # x_min=170 is written down — it is the first column of the 1152x648 view that is entirely
-    # image rather than the gripper mount or the lens blur across its edge, measured over 9
-    # episodes in 3 scenes. -1 means "the frame's own edge", standing in for that file's `null`,
-    # so the geometry survives a change of camera resolution.
-    #
-    # The node crops and does NOT resize, matching what the exporter STORES; the square-crop and
-    # resize to the encoder's input size is the policy dataset's job at load time.
-    # Resize applied after finger_crop, mirroring the exporter's output_size in
-    # ingest/config/finger_camera.yaml. -1 means no resize (the native crop, ~648x982).
-    # Set BOTH to whatever `pingest export --finger-output-size` used for the checkpoint's
-    # dataset -- a policy whose encoder shares one image_shape across its rgb keys needs
-    # finger_rgb at camera0_rgb's 224x224, and a mismatch is a silently wrong input shape.
+    # Match the crop and stored image size used by the checkpoint's training export.
+    # Crop bounds mirror ingest/config/finger_camera.yaml; -1 means the frame's edge.
+    # Output size -1/-1 disables resizing, preserving the native ~648x982 crop for Vista's
+    # own center-square crop and resize. DP exports stored at 224x224 need output size 224/224.
+    # The launch defaults override these sizes with 224/224; pass both dimensions explicitly
+    # for Vista. Encoder-side resizing does not undo a different crop or aspect-ratio change.
     finger_output_size:
       width: -1
       height: -1
@@ -206,18 +160,9 @@
       y_min: 0
       y_max: -1
 
-    # Largest age of the finger frame chosen for a step, in seconds. 0.3 is three periods of the
-    # 10 fps camera. The delivered finger-frame rate on this rig sits below nominal, and a bound
-    # tight enough to match the export skips most ticks outright ("tactile channels incomplete"),
-    # which costs an eval far more than the extra staleness does. The export's own bound is 0.15,
-    # so a frame admitted here can be older than any the training data contained — the price of
-    # running at all, and worth stating when a rollout is judged.
-    #
-    # One asymmetry no bound can remove: the export picks the NEAREST frame, which may sit up to
-    # half a period in the FUTURE of the step. Inference can only look backwards, so the same
-    # bound admits a slightly older frame here than it did there. Unfixable — that future does not
-    # exist at inference — and recorded so a rollout's staleness is judged against the right
-    # baseline.
+    # Largest age of the chosen finger frame (seconds). This tolerates the rig's delivery rate
+    # but admits older frames than the export's 0.15 s bound. Inference selects past frames;
+    # the export selects the nearest frame, which can also lie after the observation instant.
     max_finger_age_s: 0.3
 
     buffers:
@@ -226,9 +171,6 @@
       # frame). Must be >= the largest latency above that gets compensated for.
       ee_pose_s: 1.0
 
-      # Seconds of piezo audio retained. The window itself always fits -- policy_client_node
-      # floors the ring at n_audio_rows * 536 samples -- so what this buys is headroom for the
-      # latency compensation, which reaches back further than the window. Too small and the
-      # window runs off the start of the ring and is silently zero-padded. 2.0 is ~6x the
-      # 10-row window.
+      # Seconds of retained audio, including history before the latest observation instant.
+      # The ring holds at least n_audio_rows * 536 samples; missing older history is zero-padded.
       piezo_s: 2.0
