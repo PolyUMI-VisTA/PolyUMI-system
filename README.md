@@ -78,7 +78,7 @@ Clone the repo and initialize the ORB-SLAM3 submodule (used by the SLAM
 preprocessing step):
 
 ```bash
-git clone git@github.com:cwoodhayes/PolyUMI.git
+git clone git@github.com:PolyUMI-VisTA/PolyUMI-system.git PolyUMI
 cd PolyUMI
 git submodule update --init --recursive
 ```
@@ -110,7 +110,7 @@ source install/setup.bash
 cd ..
 ```
 
-Build the [ORB-SLAM3 fork](https://github.com/cwoodhayes/ORB_SLAM3_PolyUMI). First, install the system dependencies (Ubuntu;
+Build the [ORB-SLAM3 fork](https://github.com/PolyUMI-VisTA/ORB_SLAM3_PolyUMI). First, install the system dependencies (Ubuntu;
 the fork's [README.md](external/ORB_SLAM3_PolyUMI/README.md) has more detail):
 
 ```bash
@@ -245,7 +245,7 @@ Humble/Kilted boundary.
 
 ## Hardware Notes
 
-The Raspberry Pi app in `pi/` also depends upon a custom fork of [OpenGoPro](https://github.com/cwoodhayes/OpenGoPro) with some specific extra capabilities & one bugfix; without these the library cannot connect over BLE on Debian Trixie (and its downsteam RPi fork which we are using.)
+The Raspberry Pi app in `pi/` also depends upon a custom fork of [OpenGoPro](https://github.com/PolyUMI-VisTA/OpenGoPro) with some specific extra capabilities & one bugfix; without these the library cannot connect over BLE on Debian Trixie (and its downsteam RPi fork which we are using.)
 
 ### PiSugar Battery
 
