@@ -331,4 +331,4 @@ If you find our work useful, please consider citing us!
 
 This project was originally developed by [Conor Wood Hayes](https://cwoodhayes.github.io) as part of the Master of Science in Robotics (MSR) program at Northwestern University. Writeups about his initial bringup of the gripper, training, and the end-to-end system are [here](https://cwoodhayes.github.io/projects/polyumi-policy) and [here](https://cwoodhayes.github.io/projects/polyumi).
 
-It is currently maintained by the **[Center for Robotics and Biosystems](https://robotics.northwestern.edu/)** at Northwestern University.
+It has received further contributions from collaborators at Northwestern University and [PEARL Lab @ TU Darmstadt](https://pearl-lab.com/), and is currently maintained by the **[Center for Robotics and Biosystems](https://robotics.northwestern.edu/)** at Northwestern University.
