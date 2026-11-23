@@ -67,6 +67,10 @@ echo ">> serving ${POLICY} (checkpoint: ${CKPT}) on http://0.0.0.0:${PORT}"
 # mount — only ':' would confuse -v); CKPT_PATH points at the clean in-container path. HOME and
 # cache dirs point at /tmp so anything needing a writable home works regardless of the container
 # uid under rootless.
+#
+# SERVE_TACTILE is forwarded by name, not value: the Vista fork's serve_policy.py reads it to
+# decide whether finger_rgb and mic_0 are required channels, and it must agree with the ROS
+# node's send_tactile. Unset on the host it stays unset in the container, which is what dp wants.
 # shellcheck disable=SC2086
 exec docker run --rm -i ${TTY_FLAG} \
     ${GPU_FLAG} \
@@ -74,6 +78,7 @@ exec docker run --rm -i ${TTY_FLAG} \
     -p "${PORT}:8000" \
     -e HOME=/tmp \
     -e CUDA_VISIBLE_DEVICES \
+    -e SERVE_TACTILE \
     -e MPLCONFIGDIR=/tmp/mpl \
     -e NUMBA_CACHE_DIR=/tmp/numba \
     -e HF_HOME=/hf_cache \

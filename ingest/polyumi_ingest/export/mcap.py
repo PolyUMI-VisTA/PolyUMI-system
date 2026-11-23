@@ -816,6 +816,7 @@ def export_episode_to_mcap(
     jpeg_quality: int = 85,
     audio_chunk_size: int = 4096,
     root_grp: zarr.Group | None = None,
+    include_gopro_video: bool = True,
 ) -> None:
     """
     Write one pzarr episode group to an MCAP file at output_path.
@@ -823,11 +824,16 @@ def export_episode_to_mcap(
     GoPro video frames are decoded on demand from the episode's gopro.mp4
     sidecar, resolved relative to ``scene_zarr``; the /gopro/image channel is
     only written when that sidecar can be found.
+
+    ``include_gopro_video=False`` drops /gopro/image alone, keeping the GoPro's
+    audio and IMU. The wrist video re-encodes to roughly 275 MB per episode as
+    individual JPEGs -- two orders of magnitude more than every other channel
+    combined -- so a tactile- or audio-only bag is far cheaper without it.
     """
     # GoPro frames live in the gopro.mp4 sidecar, not the zarr. The video channel
     # is available only if we can resolve that mp4 for this episode.
     gopro_mp4 = None
-    if scene_zarr is not None and 'timestamps/gopro' in ep_grp:
+    if include_gopro_video and scene_zarr is not None and 'timestamps/gopro' in ep_grp:
         try:
             gopro_mp4 = resolve_gopro_mp4(ep_grp, scene_zarr)
         except FileNotFoundError:
@@ -1140,9 +1146,14 @@ def export_scene_to_mcap(
     episode: int | None = None,
     jpeg_quality: int = 85,
     audio_chunk_size: int = 4096,
+    include_gopro_video: bool = True,
+    skip_mapping: bool = False,
 ) -> list[pathlib.Path]:
     """
     Export pzarr episodes from a scene to MCAP files, one file per episode.
+
+    ``skip_mapping`` omits MAPPING sessions, which are long scene scans with no
+    demonstration in them and are the largest files a scene produces.
 
     Returns the list of written .mcap paths.
     """
@@ -1163,6 +1174,9 @@ def export_scene_to_mcap(
             log.warning(f'Episode {ep_idx} not found in {zarr_path.name}, skipping.')
             continue
         ep_grp = zarr.open_group(str(zarr_path / ep_key), mode='r')
+        if skip_mapping and ep_grp.attrs.get('session_type') == 'MAPPING':
+            log.info(f'Episode {ep_idx}: MAPPING session, skipping.')
+            continue
         out_path = out_dir / f'episode_{ep_idx}.mcap'
         log.info(f'Exporting episode {ep_idx} → {out_path}')
         export_episode_to_mcap(
@@ -1172,6 +1186,7 @@ def export_scene_to_mcap(
             jpeg_quality=jpeg_quality,
             audio_chunk_size=audio_chunk_size,
             root_grp=root,
+            include_gopro_video=include_gopro_video,
         )
         size_mb = out_path.stat().st_size / 1e6
         log.info(f'  Done ({size_mb:.1f} MB)')

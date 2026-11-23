@@ -8,10 +8,13 @@ a bad stale count just moves the arm to the wrong waypoint — so they are pinne
 than left to hardware testing to notice.
 """
 
+from collections import deque
+
 import threading
 import time
 from unittest.mock import patch
 
+import cv2
 import numpy as np
 import pytest
 import rclpy
@@ -19,7 +22,7 @@ from geometry_msgs.msg import TransformStamped
 from rclpy.clock import ClockType
 from rclpy.parameter import Parameter
 from rclpy.time import Time
-from sensor_msgs.msg import Image, JointState
+from sensor_msgs.msg import CompressedImage, Image, JointState
 
 from polyumi_inference import ActionChunk, Observation, TransportError
 from polyumi_ros2.policy_client_node import PolicyClientNode
@@ -427,6 +430,7 @@ def _drive_ticks(node, n_ticks: int) -> int:
     now = _t(100.0)
     node._latest_image = np.zeros((4, 4, 3), dtype=np.uint8)
     node._latest_image_stamp = now
+    node._image_history.append((now, node._latest_image))
     # Pre-fill the obs buffer so every tick is a full-buffer tick (skips the fill-up ramp),
     # and latch the reset so the episode-start POST doesn't interfere.
     fixed_pose = np.zeros(8)
@@ -952,6 +956,7 @@ def test_tick_packs_the_channels_the_policy_needs(make_node):
     now = _t(100.0)
     node._latest_image = np.zeros((224, 224, 3), dtype=np.uint8)
     node._latest_image_stamp = now
+    node._image_history.append((now, node._latest_image))
     node._episode_reset_done = True
     for _ in range(node._n_obs_steps):
         node._obs_buffer.append((node._latest_image, np.zeros(8)))
@@ -1047,6 +1052,7 @@ def test_control_tick_does_not_block_on_reset(make_node):
     now = _t(100.0)
     node._latest_image = np.zeros((4, 4, 3), dtype=np.uint8)
     node._latest_image_stamp = now
+    node._image_history.append((now, node._latest_image))
     for _ in range(node._n_obs_steps):
         node._obs_buffer.append((node._latest_image, np.zeros(8)))
 
@@ -1098,3 +1104,181 @@ def test_worker_does_a_pending_reset_before_a_pending_observation(make_node):
             time.sleep(0.05)
 
     assert order == ['reset', 'predict']
+
+
+def test_observation_instant_is_the_oldest_stream_not_the_wrist_camera(make_node):
+    """
+    The shared instant must follow the slowest stream, or channels describe different moments.
+
+    The finger camera's transport runs ~150 ms behind the GoPro's, so taking the wrist stamp
+    would pair a fresh wrist frame with tactile data from a sixth of a second earlier.
+    """
+    node = make_node()
+    node._send_tactile = True
+    node._latency.update({'gopro': 0.0, 'finger_cam': 0.0, 'piezo_mic': 0.0})
+    node._latest_image_stamp = _t(100.0)
+    node._latest_finger_stamp = _t(99.85)
+    node._piezo_end_ns = _t(100.0).nanoseconds
+
+    t_obs = node._observation_instant()
+
+    assert t_obs.nanoseconds == _t(99.85).nanoseconds, 'must take the finger camera, the oldest'
+
+
+def test_a_piezo_bound_instant_can_be_used_against_the_image_history(make_node):
+    """
+    When the contact mic is the oldest stream, t_obs is rebuilt from bare nanoseconds.
+
+    It must land on the header stamps' clock, or _frame_at's comparison against the ROS_TIME image
+    history raises "Can't compare times with different clock types" and kills the node.
+    """
+    node = make_node()
+    node._send_tactile = True
+    node._latency.update({'gopro': 0.0, 'finger_cam': 0.0, 'piezo_mic': 0.0})
+    node._latest_image_stamp = _t(100.0)
+    node._latest_finger_stamp = _t(100.0)
+    node._piezo_end_ns = _t(99.5).nanoseconds
+
+    t_obs = node._observation_instant()
+
+    assert t_obs.nanoseconds == _t(99.5).nanoseconds, 'the piezo must set t_obs here'
+    history = deque([(_t(99.4), 'frame'), (_t(99.9), 'newer')])
+    assert node._frame_at(history, t_obs, 0.0)[1] == 'frame'
+
+
+def test_observation_instant_ignores_tactile_when_it_is_off(make_node):
+    """With send_tactile off the wrist camera is the only stream, so it sets the instant alone."""
+    node = make_node()
+    node._send_tactile = False
+    node._latency.update({'gopro': 0.0})
+    node._latest_image_stamp = _t(100.0)
+    node._latest_finger_stamp = _t(99.0)
+
+    assert node._observation_instant().nanoseconds == _t(100.0).nanoseconds
+
+
+def test_frame_at_picks_the_frame_captured_at_the_instant_not_the_newest(make_node):
+    """Sampling history at the shared instant is what actually aligns the channels."""
+    node = make_node()
+    history = deque([(_t(99.8), 'old'), (_t(99.9), 'wanted'), (_t(100.0), 'too new')])
+
+    picked = node._frame_at(history, _t(99.9), 0.0)
+
+    assert picked[1] == 'wanted'
+
+
+def test_frame_at_returns_none_when_every_frame_is_newer_than_the_instant(make_node):
+    """Holding the next-newest frame would pair the policy with the future; None skips instead."""
+    node = make_node()
+    history = deque([(_t(100.0), 'future')])
+
+    assert node._frame_at(history, _t(99.0), 0.0) is None
+
+
+def test_frame_at_subtracts_the_stream_latency_when_comparing(make_node):
+    """A frame's capture instant is its stamp minus that stream's latency, not its stamp."""
+    node = make_node()
+    history = deque([(_t(100.0), 'frame')])
+
+    # Stamped at 100.0 but captured at 99.9, so it does cover an instant of 99.9.
+    assert node._frame_at(history, _t(99.9), 0.1)[1] == 'frame'
+    # ...and does not cover 99.8, which is before it was captured.
+    assert node._frame_at(history, _t(99.8), 0.1) is None
+
+
+def test_finger_camera_binds_the_observation_instant_at_measured_latencies(make_node):
+    """
+    With the real constants, the finger camera is the slowest stream and must set the instant.
+
+    Uses the values actually in inference.yaml and measured on the rig: the GoPro's delay sits
+    BEFORE its stamp (0.1087, calibrated, since v4l2_camera stamps at dequeue) while the Pi's
+    sits AFTER it (the Pi stamps at true capture in hardware, hence 0.0). So the newest sample
+    each can offer is now-119 ms for the wrist camera and now-161 ms for the finger camera. The
+    two are only comparable once both are converted to capture instants, which is what this
+    pins -- comparing the raw transport figures gets the wrong answer.
+    """
+    node = make_node()
+    node._send_tactile = True
+    node._latency.update({'gopro': 0.1087, 'finger_cam': 0.0, 'piezo_mic': 0.0})
+    now = 100.0
+    node._latest_image_stamp = _t(now - 0.010)  # 10 ms transport, measured
+    node._latest_finger_stamp = _t(now - 0.161)  # 161 ms transport, measured
+    node._piezo_end_ns = _t(now - 0.030).nanoseconds
+
+    t_obs = node._observation_instant()
+
+    assert t_obs.nanoseconds == _t(now - 0.161).nanoseconds, 'the finger camera is the oldest'
+    # The wrist camera's own capture instant is 119 ms back, so it is NOT the binding stream even
+    # though its stamp is the freshest by far.
+    gopro_capture = now - 0.010 - 0.1087
+    assert t_obs.nanoseconds < _t(gopro_capture).nanoseconds
+
+
+def test_finger_staleness_is_aged_against_now_like_the_wrist_frame(make_node):
+    """
+    A dead finger camera must trip its own guard.
+
+    The finger camera is usually the slowest stream, so it sets t_obs itself. Aged against t_obs
+    it would show a near-zero gap however long it had been dead -- the frame is stale precisely
+    because it is the newest one, which is the case this pins. Aged against now, as the wrist
+    frame is, it reads its true 0.5 s and trips the limit.
+    """
+    node = make_node(send_tactile=True, max_finger_age_s=0.3, max_image_age_s=5.0)
+    node._latency.update({'gopro': 0.0, 'finger_cam': 0.0, 'piezo_mic': 0.0})
+    now = _t(100.0)
+    dead = _t(99.5)  # 0.5 s stale against a 0.3 s limit
+    frame = np.zeros((4, 4, 3), dtype=np.uint8)
+    node._latest_image_stamp = now
+    # Wrist frames spanning back past t_obs, as a 60 Hz stream really would: one of them has to
+    # cover the instant the finger camera sets, or the tick is skipped before the guard is reached.
+    for k in range(60):
+        node._image_history.append((_t(99.0 + k * 1 / 60.0), frame))
+    node._latest_finger_stamp = dead
+    node._finger_history.append((dead, frame))
+    node._piezo_end_ns = now.nanoseconds
+    node._episode_reset_done = True
+
+    assert node._observation_instant().nanoseconds == dead.nanoseconds, 'the finger sets t_obs'
+
+    ages = []
+    with (
+        patch.object(node, 'get_clock', return_value=_FakeClock(now)),
+        patch.object(node, '_lookup_agent_pos', return_value=np.zeros(8)),
+        patch.object(node, '_diag', side_effect=lambda name, v: ages.append(v) if name == 'finger_age_s' else None),
+    ):
+        node._control_tick()
+
+    assert ages, 'the finger age must be published as a diagnostic'
+    assert ages[0] == pytest.approx(0.5, abs=1e-3), 'aged against now, not against the instant it set'
+
+
+def test_finger_output_size_defaults_to_no_resize(make_node):
+    """The shipped default must leave the native crop alone, so existing checkpoints keep working."""
+    node = make_node(send_tactile=True)
+    assert node._finger_output_size is None
+
+
+def test_finger_output_size_is_applied_to_the_decoded_frame(make_node):
+    """
+    Set, it must resize exactly as the exporter's output_size does.
+
+    Training and inference share crop_finger_rgb so the frame the policy sees matches the one it
+    learned from; if this were declared but not passed through, a checkpoint trained on 224x224
+    would silently receive the native crop.
+    """
+    node = make_node(
+        send_tactile=True,
+        **{'finger_output_size.width': 224, 'finger_output_size.height': 224},
+    )
+    assert node._finger_output_size == (224, 224)
+
+    frame = np.zeros((648, 1152, 3), dtype=np.uint8)
+    ok, buf = cv2.imencode('.jpg', frame)
+    assert ok
+    msg = CompressedImage()
+    msg.format = 'jpeg'
+    msg.data = buf.tobytes()
+    msg.header.stamp = _t(100.0).to_msg()
+    node._finger_cb(msg)
+
+    assert node._latest_finger.shape[:2] == (224, 224)

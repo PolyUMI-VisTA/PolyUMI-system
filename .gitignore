@@ -4,6 +4,7 @@ plans/
 data/
 *.tmp
 *.npz
+**/water_logmel/
 
 # generated files
 pi/polyumi_pi/_version.py

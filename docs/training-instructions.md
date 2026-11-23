@@ -31,8 +31,9 @@ default) produces. Vista adds the finger camera and the contact mic, from
 - An **exported dataset**: `pingest export <scene> --output <name>.zarr.zip`. Copy the
   `.zarr.zip` to the workstation.
 - A **Weights & Biases** API key (`WANDB_API_KEY`) if you want online logging. `WANDB_ENTITY`
-  and `WANDB_PROJECT` are optional — unset, they default to your wandb login's default entity
-  and the `polyumi` project.
+  and `WANDB_PROJECT` are optional, forwarded only if set in the calling shell
+  (`${oc.env:WANDB_ENTITY,null}` / `${oc.env:WANDB_PROJECT,polyumi}`) — unset, they fall back to
+  your wandb login's default entity and the `polyumi` project, not to a hard-coded team.
 
 ## Quick start
 
@@ -43,24 +44,64 @@ From the PolyUMI repo root on the workstation:
 DATASET=/abs/path/to/your.zarr.zip \
 WANDB_API_KEY=... \
 ./train_policy.sh training.num_epochs=3 task.dataset.val_ratio=0 logging.mode=offline
-
-# Full run, logging to a specific entity/project instead of the defaults:
-DATASET=/abs/path/to/your.zarr.zip \
-WANDB_API_KEY=... \
-WANDB_ENTITY=my-team \
-WANDB_PROJECT=my-project \
-./train_policy.sh
 ```
 
-`train_policy.sh` builds `external/polyumi_diffusion_policy` and runs it with the rootless-safe
-flags and the dataset/output mounts. Any extra arguments pass straight through to `train.py` as
-**Hydra overrides** (`training.num_epochs=...`, `logging.mode=offline`, `task.dataset_path=...`,
-etc). Outputs (checkpoints, hydra logs) land in `data/dp_outputs/` by default (`OUTPUT_DIR`).
+That proves the image builds, the GPU is visible and the dataset loads. `train_policy.sh` builds
+`external/polyumi_diffusion_policy` and runs it with the rootless-safe flags and the
+dataset/output mounts; extra arguments pass straight through to `train.py` as **Hydra overrides**,
+and outputs land in `data/dp_outputs/` (`OUTPUT_DIR`). Real runs are below.
 
-`CONFIG_NAME` selects which Hydra workspace config runs, for a fork that offers more than one (an
-env var rather than a Hydra override, because Hydra cannot set `--config-name` that way). Each
-policy's default is in its `config/policy.*.env`; set `CONFIG_NAME` in the calling shell to
-override it for one run. It replaces the old `DP_CONFIG`, which was never wired to anything.
+## Worked examples
+
+These are the invocations the shipped checkpoints were actually trained with. `WANDB_API_KEY` is
+elided throughout; set it in the calling shell.
+
+**Visuomotor (`dp`), the default.** `CONFIG_NAME` picks the workspace config, and so the task;
+everything else is identical between runs, which is why only that one variable changes below. It
+is an env var rather than a Hydra override because Hydra cannot set `--config-name` that way, and
+it replaces the old `DP_CONFIG`, which was never wired to anything.
+
+```bash
+# Standard visuomotor, the default config:
+DATASET=/abs/path/to/gears_v2_polyumi_clean.zarr.zip ./train_policy.sh
+
+# A tactile+audio task on the same corpus — same command, different CONFIG_NAME:
+CONFIG_NAME=train_diffusion_unet_timm_polyumi_tactile_audio_workspace \
+DATASET=/abs/path/to/gears_v2_polyumi_clean.zarr.zip ./train_policy.sh
+```
+
+**Slip-control ablations.** One workspace config per sensor combination — `_slip_v` (vision only),
+`_slip_t`, `_slip_a`, `_slip_vt`, `_slip_va`, `_slip_vta` — all against the same export, so the
+only thing that differs between runs is which streams the task declares:
+
+```bash
+CONFIG_NAME=train_diffusion_unet_timm_polyumi_slip_vta_workspace \
+DATASET=/abs/path/to/slip_polyumi_224.zarr.zip ./train_policy.sh
+
+CONFIG_NAME=train_diffusion_unet_timm_polyumi_slip_t_workspace \
+DATASET=/abs/path/to/slip_polyumi_224.zarr.zip ./train_policy.sh
+```
+
+**Vista (`POLICY=vista`).** Selected by `--model`, not `CONFIG_NAME` — the fork's suite runner
+passes its own `--config-name` per model. Hydra overrides go after a `--` separator:
+
+```bash
+POLICY=vista DATASET=/abs/path/to/gears_v2_polyumi_clean.zarr.zip \
+    ./train_policy.sh --model mitas
+
+POLICY=vista DATASET=/abs/path/to/gears_v2_polyumi_clean.zarr.zip \
+    ./train_policy.sh --model see_hear_feel
+
+POLICY=vista DATASET=/abs/path/to/gears_v2_polyumi_clean.zarr.zip \
+    ./train_policy.sh --model sparsh_x
+
+# Resume, and sensor ablations, via the -- separator:
+POLICY=vista DATASET=... ./train_policy.sh --model mitas -- training.resume=true
+POLICY=vista DATASET=... ./train_policy.sh --model mitas -- ablation=v
+```
+
+Serving one of these: the image-side mechanics are under "Inference" below; which flags each
+policy family needs on the arm is [crb-fr3-inference.md](crb-fr3-inference.md) §3.
 
 ## Choosing a policy
 
@@ -87,11 +128,6 @@ Building without starting a run — useful for the first, slow build of a new fo
 ```bash
 POLICY=vista ./build_policy_image.sh
 ```
-
-`WANDB_ENTITY`/`WANDB_PROJECT` are forwarded to the container only if set in the calling shell
-(the config resolves them via `${oc.env:WANDB_ENTITY,null}` / `${oc.env:WANDB_PROJECT,polyumi}`),
-so leaving them unset falls back to your wandb login's default entity and the `polyumi` project
-— it does not fall back to a hard-coded team.
 
 ## Building the image
 
@@ -145,7 +181,7 @@ handles the ones it can and exposes the rest as env vars.
 3. **Shared memory.** The PyTorch DataLoader needs more than Docker's 64 MB default `/dev/shm`
    or workers crash with a bus error. The script sets `--shm-size=8g` (override with `SHM_SIZE`).
    Do **not** use `--ipc=host` under rootless.
-4. **Networking (inference).** Publish with `-p 8000:8000`. Do **not** use `--network host` —
+4. **Networking (inference).** Publish with `-p 8002:8000`, matching the wrapper's default. Do **not** use `--network host` —
    under rootless it shares the rootless net namespace, not the real host.
 5. **Storage / no registry.** Build on the workstation from the fork checkout; rootless image
    storage lives under your home. Pruning the fork (a later task) shrinks the image.
@@ -191,7 +227,7 @@ Watch `train_action_mse_error` (and `train_loss`) descend in the console or in W
 ## Inference (after you have a checkpoint)
 
 The same image serves the policy over the exact HTTP contract the ROS-side
-`policy_client_node` already speaks to `inference_server/dummy_server.py`. Use the
+`policy_client_node` already speaks to `inference_server/polyumi_inference/dummy_server.py`. Use the
 `serve_policy.sh` wrapper (the inference counterpart of `train_policy.sh` — it builds the image
 and wires the rootless-safe flags, checkpoint mount, and HF cache):
 
@@ -207,7 +243,7 @@ CKPT=/abs/path/to/epoch=0070-train_loss=0.021.ckpt ./serve_policy.sh
 The equivalent raw command, if you'd rather not use the wrapper:
 
 ```bash
-docker run --rm -it --gpus all --user 0:0 -p 8000:8000 \
+docker run --rm -it --gpus all --user 0:0 -p 8002:8000 \
     -e HOME=/tmp -e HF_HOME=/hf_cache \
     -e CKPT_PATH=/data/model.ckpt \
     -v /abs/path/to/epoch=0070-train_loss=0.021.ckpt:/data/model.ckpt:ro \
@@ -220,45 +256,32 @@ weights (~600 MB) so the server doesn't re-download them on every start — the 
 `train_policy.sh` uses. `--gpus all` and `--user 0:0` mirror the training flags (GPU access;
 rootless-safe uid). Mounting the checkpoint *file* to a clean path sidesteps the `=` in its name.
 
-`policy_client_node` then POSTs to `http://<workstation>:8000/predict_cartesian/` — the same
-call it makes to the dummy server today, so nothing changes on the ROS side but the URL.
+Set the client's `inference_server_url` to `http://<workstation>:8002/predict_cartesian/`
+(or the port selected with `PORT`). The launch file defaults to the dummy server on port 8000.
 
-> **`serve_policy.py` is implemented** (loads `ema_model`, translates the wire obs to UMI's keys,
-> converts the relative action chunk back to absolute EEF poses). One extra endpoint: the client
-> must `POST /reset {agent_pos: [8]}` at the start of each rollout to set the episode-start pose
-> (used by `robot0_eef_rot_axis_angle_wrt_start`); absent a reset it falls back to the current
-> pose with a warning. `policy_client_node` is wired to it (image→224, URL, `/reset` at episode
-> start) and unit-tested; what remains is the on-arm dry run — see
-> [franka-inference-bringup.md](franka-inference-bringup.md#the-on-arm-sequence).
+`serve_policy.py` serves the EMA weights and converts the relative action chunk back to absolute
+EEF poses. It has one endpoint beyond `/predict_cartesian/`: the client must `POST /reset
+{agent_pos: [8]}` at the start of each rollout to set the episode-start pose, which
+`robot0_eef_rot_axis_angle_wrt_start` is measured against. Absent a reset it falls back to the
+current pose and warns. Running it on the arm is [crb-fr3-inference.md](crb-fr3-inference.md).
 
 ## Vista
 
-`POLICY=vista` runs Rickmer's multimodal zoo — vision (`camera0_rgb`) + finger camera
-(`finger_rgb`) + contact mic (`mic_0`) + proprioception, with an encoder / fusion / head /
-objective cross-product. Architecture, registries and the porting map are in the fork's
+`POLICY=vista` runs the multimodal models using vision (`camera0_rgb`), finger camera
+(`finger_rgb`), contact mic (`mic_0`) and proprioception. Architecture and model details are in the fork's
 [`docs/VISTA_AGENT_GUIDE.md`](../external/polyumi_vista_policy/docs/VISTA_AGENT_GUIDE.md).
 
-The submodule is **private** (`RiicK3d/polyumi_vista_policy`), so `git submodule update --init
+The submodule is **private** (`RickmerKrohn/polyumi_vista_policy`), so `git submodule update --init
 external/polyumi_vista_policy` needs collaborator access.
 
-**lamb's copy is hand-managed, and `deploy_lamb.sh` deliberately does not sync it** — it is in
-that script's exclude list, and the deploy only checks that it is present. The checkpoints under
-`data/dp_outputs/` were trained against a working copy that is not any commit of the fork, so
-overwriting it by rsync makes them unloadable. Update lamb's copy by hand when you mean to, and
-expect a fresh lamb to need it put there by hand once.
+**lamb's copy is hand-managed: `deploy_lamb.sh` does not sync it.** Preserve the working copy
+that existing checkpoints require, and install a matching checkout manually on a fresh lamb.
 
-The entrypoint is `scripts/train_day0suite.sh`, a suite runner over eight models: four full
-multimodal (`vista`, `touch_in_the_wild`, `see_hear_feel`, `sparsh_x`), two vision-only
-(`vista_v`, `sparsh_x_v`), two vision+tactile (`vista_vt`, `touch_in_the_wild_vt`). A bare
-invocation trains **all eight back to back**, so narrow it with `--model`:
-
-```bash
-POLICY=vista DATASET=/abs/path/to/day0suite.zarr.zip \
-    ./train_policy.sh --model vista_vt training.max_epochs=2 logging.mode=offline
-```
-
-Note `training.max_epochs`, not the visuomotor config's `training.num_epochs`. `DRY_RUN=1` prints
-the `train_vista.py` command lines each model would run and exits.
+The suite runner supports six models: `see_hear_feel`, `sparsh_x`, `polytouch`, `qformer`,
+`mitas` and `vta_diffusion`. Without `--model`, it trains **all six sequentially**. Use the
+[worked examples](#worked-examples) to select one model and pass Hydra overrides after `--`.
+These configs use `training.num_epochs`. `DRY_RUN=1` prints the `train_vista.py` commands
+without training.
 
 ### Running the fork's tests
 
@@ -276,16 +299,9 @@ docker run --rm --user 0:0 \
 CPU-only, no GPU flag needed. The HF-cache mount is for the AST audio encoder, which the `va` and
 `vta` ablation groups pull from the hub on first run.
 
-> **`vista/data/` is missing from the fork**, so nothing that touches the dataset runs yet — the
-> repo's `.gitignore` has an unanchored `data` pattern, which git applies at every depth, and the
-> package was silently never committed. That is why the command above names those two test files:
-> `test/test_vista_dataset.py` fails at import, and training fails on
-> `vista/config/task/day0suite.yaml`'s `_target_: vista.data.vista_dataset.VistaDataset`. Fix is
-> upstream — anchor the pattern (`/data`) and commit the package.
-
 ## What is out of scope here
 
-Calibration (`T_gopro_to_fingertip`, `latency.gopro`, the `eef_frame` static TF) is a separate ticket
-and does **not** gate training: the task config sets `dataset_frequeny: 0`, which zeroes every
-`latency_steps`, so the latency numbers are inert during training. A policy trained now will not
-*deploy* correctly until calibration lands, but its loss curve is meaningful.
+Robot calibration (`T_gopro_to_fingertip`, `latency.gopro`, the `eef_frame` static TF) is separate
+from training. The task config sets `dataset_frequeny: 0`, which zeroes every `latency_steps`,
+so these latency settings do not affect training. Before deployment, follow
+[calibration-instructions.md](calibration-instructions.md) for the hardware in use.

@@ -30,6 +30,23 @@ resolution_divisor: 1
 # Env override: POLYUMI_SLAM_LOC_STRIDE
 localization_frame_stride: 2
 
+# Build the map from the mapping sweep AND every episode, instead of the sweep alone.
+#
+# false => the map is whatever the MAPPING walk saw; episodes are localized against it
+#          read-only and never contribute to it. This is the long-standing behaviour.
+# true  => after the sweep builds the seed map, each episode is fed back through the map
+#          builder with the atlas loaded as well as saved, so its keyframes join the map.
+#          Every episode -- including the mapping pass -- is then localized against the
+#          finished map, so the early episodes benefit from the later ones too.
+#
+# The point is coverage: the sweep never occupies the close-up viewpoints the camera holds
+# during manipulation, so the map is thinnest exactly where tracking is hardest. Costs
+# roughly one extra map-builder run per episode, and an episode only contributes if it can
+# relocalize into the map -- ones that already track badly are the least likely to help.
+# Recorded per episode as `annotations/slam/accumulated_map`.
+# Env override: POLYUMI_SLAM_ACCUMULATE
+accumulate_map: false
+
 # Where the camera/IMU calibration actually lives. Not loaded from here -- recorded
 # so this file is a complete map of SLAM configuration.
 #

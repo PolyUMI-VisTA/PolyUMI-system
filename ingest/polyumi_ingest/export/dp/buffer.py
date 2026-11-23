@@ -161,6 +161,39 @@ _GAP_WARN_FACTOR = 5.0
 MIN_SEGMENT_STEPS = 90
 
 
+#: Median-filter window, in GoPro frames, applied to the ArUco gripper width before it becomes
+#: a training label. 5 frames is 83 ms at 60 Hz — long enough to remove the isolated misreads
+#: (residual std 0.4 mm, worst 8.8 mm, measured over 75 episodes) and short enough to cost only
+#: ~2% of the 6.4 mm median travel a grasp actually uses.
+#:
+#: The label needs this and the robot's own signal does not: training reads ArUco tag separation
+#: at 60 Hz, while at inference the policy is fed the gripper encoder over
+#: /fr3_gripper/joint_states. Unfiltered, ~6% of the label's range is noise that has no
+#: counterpart at deployment, so the policy spends capacity fitting a process it will never see.
+GRIPPER_MEDIAN_WINDOW = 5
+
+#: Consecutive over-stroke frames that mark an episode as tracking-runaway rather than
+#: scattered misreads. The four episodes that motivated this ran 78-140 frames (1.3-2.3 s
+#: at 60 Hz), every one of them ending on the episode's final frame; the median filter
+#: above cannot help a run this long, and no filter should try.
+GRIPPER_OVER_STROKE_RUN_FRAMES = 30
+
+
+def _median_filter_1d(x: np.ndarray, window: int) -> np.ndarray:
+    """
+    Median-filter ``x`` with edge padding.
+
+    Not ``scipy.signal.medfilt``, which zero-pads: an episode's first and last samples are real
+    gripper widths, and mixing zeros into their windows would pull the ends toward "closed" —
+    exactly the samples a policy's first and last actions depend on.
+    """
+    if window < 3 or len(x) < window:
+        return x
+    half = window // 2
+    padded = np.pad(x, (half, half), mode='edge')
+    return np.median(np.lib.stride_tricks.sliding_window_view(padded, window), axis=1)
+
+
 def _episode_frame_stride(ep: zarr.Group) -> int:
     """
     Return the frame decimation SLAM ran at, which is the grid poses exist on.
@@ -400,15 +433,34 @@ def plan_episode_segments(
     # miscalibrated one announces itself rather than silently widening the range.
     max_opening_m = open_width_m - closed_width_m
     gripper = np.asarray(arr(ep, 'annotations/gripper_width/width_m')[:], dtype=np.float64)
+    # Filtered before the offset and the clamp, so an isolated misread is replaced by its
+    # neighbours rather than saturated at the stroke — a clamped outlier is still a wrong
+    # label, just a bounded one.
+    gripper = _median_filter_1d(gripper, GRIPPER_MEDIAN_WINDOW)
     gripper = np.maximum(gripper - closed_width_m, 0.0)
-    n_over = int((gripper > max_opening_m).sum())
+    over = gripper > max_opening_m
+    n_over = int(over.sum())
     if n_over:
+        # Scattered over-stroke samples and one long run are different faults, and the count
+        # alone cannot tell them apart. A run is the ArUco width ramping away and never
+        # recovering — smooth, plausible-looking, and clamped to a flat wall at full-open that
+        # the demonstration never did. That is a corrupt episode, not a calibration error, and
+        # it should be marked unusable in scene.json rather than exported.
+        runs = _split_runs(over)
+        longest = max((b - a + 1 for a, b in runs), default=0)
         log.warning(
             f'  {episode_key}: {n_over}/{len(gripper)} gripper width(s) exceed the calibrated '
             f'stroke ({max_opening_m * 1e3:.2f} mm, max seen {gripper.max() * 1e3:.2f} mm); '
             f'clamping. A few are misread tags; many mean open_mm in gripper_calib.yaml is '
             f'wrong — re-derive it with `pingest calibrate-gripper`.'
         )
+        if longest >= GRIPPER_OVER_STROKE_RUN_FRAMES:
+            log.warning(
+                f'  {episode_key}: {longest} CONSECUTIVE frames over stroke — this looks like '
+                f'ArUco tracking running away, not misread tags. The clamped label is a flat '
+                f'wall at full-open that never happened. Review it and, if so, mark it unusable '
+                f'in scene.json before training on this export.'
+            )
     gripper = np.minimum(gripper, max_opening_m)
 
     n = len(gopro_ts)

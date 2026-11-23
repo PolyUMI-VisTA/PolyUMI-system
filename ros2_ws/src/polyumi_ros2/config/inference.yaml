@@ -1,6 +1,6 @@
 # policy_client_node inference config: control cadence + per-component system latencies.
-# Loaded by inference_demo.launch.xml via `<param from="...">`. This is the single place to
-# tune how the on-arm inference loop runs; the node's own declared defaults mirror these.
+# Loaded by inference_demo.launch.xml. Explicit launch parameters override this file;
+# see docs/crb-fr3-inference.md for the checkpoint-specific launch arguments.
 
 /**:
   ros__parameters:
@@ -9,7 +9,7 @@
     # requested/published every steps_per_inference ticks, while the arm executes the previous
     # one. This is UMI's scheme (re-infer every ~steps_per_inference*dt) and it stops the
     # per-tick POST/publish storm. 1 = infer every tick. Should be <= n_action_steps.
-    steps_per_inference: 3
+    steps_per_inference: 8
 
     # How many action steps to request per inference. The chunk must span the whole
     # observation->motion budget for a device, or every action in it is already in the past by the
@@ -18,11 +18,16 @@
     # are ignored.
     n_action_steps: 16
 
+    # Recency decay constant (seconds) for blending overlapping action chunks. 0 disables it.
+    # Larger values retain older predictions, trading responsiveness for smoother transitions.
+    # Tune against measured motion; this is not a calibrated latency.
+    temporal_ensemble_tau_s: 0.0
+
     # --- Per-component latencies, in seconds. ---
-    # Measured with `ros2 run polyumi_ros2 latency_probe`, one mode per value. Procedures and what
-    # each number does and does not cover: docs/calibration-instructions.md, "Latencies".
+    # Measurements, assumptions and calibration procedures are documented under "Latencies"
+    # in docs/calibration-instructions.md. Not every value below has been measured.
     #
-    # Only ONE of these needs a rig. The budget is
+    # The budget is
     #
     #   photon --(gopro)--> header.stamp --(measured live)--> response --(arm_exec)--> motion
     #
@@ -42,18 +47,12 @@
       # calibrated 2026-08-11 on the crb's fr3 arm setup.
       gopro: 0.1087
 
-      # Finger camera latency. Declared but never consumed — the policy has no tactile input
-      # yet (see "What's left" in docs/franka-inference-bringup.md). Left at 0 so it cannot skew
-      # anything until it is wired.
-      #
-      # Unmeasured, and measuring it needs a rig: the span from photon to ROS header stamp
-      # covers the Pi's sensor, JPEG encode, ZMQ hop and receive loop, none of which is
-      # observable from inside the node.
+      # Residual photon-to-header delay. The Pi uses the camera's capture timestamp, so no
+      # extra correction is applied. This is distinct from post-stamp transport, measured at
+      # 161 ms median on 2026-09-08, which _observation_instant handles when aligning streams.
       finger_cam: 0.0
-      # Piezo mic latency. Same status as finger_cam: unwired, unmeasured, 0 until it is both.
-      # The Pi already removes the capture buffer's occupancy from the stamp
-      # (polyumi_pi/clock.py), so this covers the codec's own conversion delay, transport, and
-      # the receive loop.
+      # Residual mic-to-header delay. The Pi removes capture-buffer occupancy from the stamp;
+      # analog/ADC delay remains unconfirmed, so 0.0 is an assumption, not a measured zero.
       piezo_mic: 0.0
       # Delay from the arm's true EE pose to its measurement appearing on TF.
       #
@@ -133,8 +132,45 @@
     gripper_max_width_m: 0.0812
     gripper_min_width_m: 0.0
 
+    # Enable finger_rgb and mic_0 together for a checkpoint that needs tactile input.
+    # For Vista, match the server's SERVE_TACTILE setting; dp reads the checkpoint's channels.
+    # Missing or stale input skips the tick.
+    send_tactile: false
+    # pi_receiver_node publishes these relative to its /pi launch namespace.
+    finger_image_topic: /pi/camera/image/compressed
+    audio_topic: /pi/audio/raw
+
+    # Rows of mic_0 per request; must match the checkpoint's audio_obs_horizon.
+    # Most current Vista configs use 10 (~0.33 s); PolyTouch uses 64. Older checkpoints may use 17.
+    # The launch argument overrides this value and defaults to 17: pass n_audio_rows explicitly.
+    n_audio_rows: 10
+
+    # Match the crop and stored image size used by the checkpoint's training export.
+    # Crop bounds mirror ingest/config/finger_camera.yaml; -1 means the frame's edge.
+    # Output size -1/-1 disables resizing, preserving the native ~648x982 crop for Vista's
+    # own center-square crop and resize. DP exports stored at 224x224 need output size 224/224.
+    # The launch defaults override these sizes with 224/224; pass both dimensions explicitly
+    # for Vista. Encoder-side resizing does not undo a different crop or aspect-ratio change.
+    finger_output_size:
+      width: -1
+      height: -1
+    finger_crop:
+      x_min: 170
+      x_max: -1
+      y_min: 0
+      y_max: -1
+
+    # Largest age of the chosen finger frame (seconds). This tolerates the rig's delivery rate
+    # but admits older frames than the export's 0.15 s bound. Inference selects past frames;
+    # the export selects the nearest frame, which can also lie after the observation instant.
+    max_finger_age_s: 0.3
+
     buffers:
       # How far back (seconds) the EE-pose TF buffer retains history, so a past pose can
       # still be looked up/interpolated to align with a delayed observation (e.g. the gopro
       # frame). Must be >= the largest latency above that gets compensated for.
       ee_pose_s: 1.0
+
+      # Seconds of retained audio, including history before the latest observation instant.
+      # The ring holds at least n_audio_rows * 536 samples; missing older history is zero-padded.
+      piezo_s: 2.0

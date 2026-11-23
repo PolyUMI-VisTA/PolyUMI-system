@@ -915,3 +915,31 @@ def test_no_warning_when_every_width_is_within_the_stroke(tmp_path: pathlib.Path
         export_scene_to_dp(scene, tmp_path / 'buf.zarr.zip')
 
     assert not any('exceed the calibrated stroke' in r.message for r in caplog.records)
+
+
+def test_median_filter_preserves_endpoints_and_removes_isolated_spikes():
+    """The gripper median filter edge-pads, so an episode's first/last widths survive intact."""
+    w = np.full(40, 10.0)
+    w[20] = 40.0  # one misread tag
+    out = buffer._median_filter_1d(w, buffer.GRIPPER_MEDIAN_WINDOW)
+
+    assert out[20] == pytest.approx(10.0), 'isolated spike should be replaced by its neighbours'
+    # scipy.signal.medfilt zero-pads and would drag these toward 0; edge padding must not.
+    assert out[0] == pytest.approx(w[0])
+    assert out[-1] == pytest.approx(w[-1])
+
+
+def test_median_filter_is_a_noop_on_short_or_unwindowable_input():
+    """Too-short input and a degenerate window return the original array untouched."""
+    w = np.array([3.0, 1.0, 2.0])
+    assert buffer._median_filter_1d(w, 5) is w, 'shorter than the window: returned unchanged'
+    assert buffer._median_filter_1d(w, 1) is w, 'window < 3: returned unchanged'
+
+
+def test_median_filter_does_not_flatten_a_real_grasp_transition():
+    """A step edge is the signal, not noise — a median filter must keep it sharp."""
+    w = np.concatenate([np.full(30, 10.0), np.full(30, 3.0)])
+    out = buffer._median_filter_1d(w, buffer.GRIPPER_MEDIAN_WINDOW)
+
+    assert out.max() - out.min() == pytest.approx(7.0), 'travel must survive the filter'
+    assert np.abs(np.diff(out)).max() == pytest.approx(7.0), 'the edge must stay one step'
