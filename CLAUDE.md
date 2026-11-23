@@ -180,7 +180,7 @@ and the verification are step 6 of [docs/pi-provisioning.md](docs/pi-provisionin
 
 **The impedance controller is its own open-source repo now**, consumed as the submodule
 `external/franka_streaming_impedance_controller`
-([github](https://github.com/PolyUMI-VisTA/franka_streaming_impedance_controller), MIT). It holds
+([github](https://github.com/cwoodhayes/franka_streaming_impedance_controller), MIT). It holds
 two packages:
 
 - `franka_streaming_impedance_controller` (ament_cmake) — the core math library, the
